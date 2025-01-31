@@ -1,129 +1,106 @@
 "use client";
 
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { motion } from "framer-motion";
 import useWebRTCAudioSession from "@/hooks/use-webrtc";
 import { useWakeWord } from "@/hooks/use-wake-word";
-import { tools } from "@/lib/tools";
 import { BroadcastButton } from "@/components/broadcast-button";
 import { StatusDisplay } from "@/components/status";
-import { motion } from "framer-motion";
-import { useToolsFunctions } from "@/hooks/use-tools";
+import { tools } from "@/lib/tools";
 import { TranslationsProvider } from "@/components/translations-context";
+import { useToolsFunctions } from "@/hooks/use-tools";
 
-const WAKE_WORD_CONFIG = {
-  porcupineModel: {
-    publicPath: "/models/porcupine_params.pv",
-    customWritePath: "porcupine_model.pv",
-    forceWrite: true,
-  },
-  keywords: [
-    {
-      label: "Hi Jarvis",
-      publicPath: "/models/Hi-Jarvis.ppn",
-      sensitivity: 0.9,
-      customWritePath: "Hi-Jarvis.ppn",
-      forceWrite: true,
-    },
-  ],
-  accessKey: process.env.NEXT_PUBLIC_PICOVOICE_ACCESS_KEY || "",
-};
+function PageContent() {
+  // Update this variable as needed
+  const WAKE_WORD_COOLDOWN_MS = 5000;
+  const [wakeWordStatus, setWakeWordStatus] = useState("Initializing...");
+  const lastWakeWordTimeRef = useRef(0);
 
-const AppContent: React.FC = () => {
-  const [voice] = useState("coral");
-  const [wakeWordStatus, setWakeWordStatus] =
-    useState<string>("Initializing...");
-  const lastWakeWordTimeRef = useRef<number>(0);
-  const WAKE_WORD_COOLDOWN = 5000; // 5 seconds cooldown
-
-  const { status, isSessionActive, registerFunction, handleStartStopClick } =
-    useWebRTCAudioSession(voice, tools);
-
-  const toolsFunctions = useToolsFunctions();
-
-  const handleWakeWord = useCallback(() => {
-    const now = Date.now();
-    if (now - lastWakeWordTimeRef.current < WAKE_WORD_COOLDOWN) {
-      console.log("🔇 Wake word cooldown active");
-      return;
-    }
-
-    if (isSessionActive) {
-      console.log("🎙️ Session already active");
-      return;
-    }
-
-    console.log("🎙️ Wake word detected! Starting session...");
-    lastWakeWordTimeRef.current = now;
-    handleStartStopClick();
-  }, [isSessionActive, handleStartStopClick]);
+  const { status, isSessionActive, handleStartStopClick, registerFunction } =
+    useWebRTCAudioSession("coral", tools);
 
   const {
     start: startWakeWord,
     stop: stopWakeWord,
-    isReady: isWakeWordReady,
-    isListening: isWakeWordListening,
-    error: wakeWordError,
+    isReady,
+    isListening,
+    error,
   } = useWakeWord({
-    ...WAKE_WORD_CONFIG,
-    onWakeWord: handleWakeWord,
+    onWakeWord: handleWakeWordDetected,
+    porcupineModel: {
+      publicPath: "/models/porcupine_params.pv",
+      customWritePath: "porcupine_model.pv",
+      forceWrite: true,
+    },
+    keywords: [
+      {
+        label: "Hi Jarvis",
+        publicPath: "/models/Hi-Jarvis.ppn",
+        sensitivity: 0.9,
+        customWritePath: "Hi-Jarvis.ppn",
+        forceWrite: true,
+      },
+    ],
+    accessKey: process.env.NEXT_PUBLIC_PICOVOICE_ACCESS_KEY || "",
   });
 
-  // Initialize wake word
+  // Add debounce timeout ref
+  const statusTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const toolsFunctions = useToolsFunctions();
+  function handleWakeWordDetected() {
+    const now = Date.now();
+    if (now - lastWakeWordTimeRef.current < WAKE_WORD_COOLDOWN_MS) {
+      return;
+    }
+    lastWakeWordTimeRef.current = now;
+
+    if (!isSessionActive) {
+      console.log("Wake word detected -> starting session.");
+      handleStartStopClick();
+    }
+  }
+
+  // Manage initial wake word start/stop
   useEffect(() => {
-    let mounted = true;
-
-    const init = async () => {
-      try {
-        console.log("🎤 Starting wake word...");
-        await startWakeWord();
-      } catch (err) {
-        console.error("Failed to start wake word:", err);
-        if (mounted) {
-          setWakeWordStatus(
-            "Error: " + (err instanceof Error ? err.message : String(err))
-          );
-        }
-      }
+    startWakeWord().catch((err) => {
+      console.error("Error starting wake word detection:", err);
+    });
+    return () => {
+      stopWakeWord().catch((err) => {
+        console.error("Error stopping wake word detection:", err);
+      });
     };
+  }, [startWakeWord, stopWakeWord]);
 
-    init();
+  // Update UI status for the wake word with debouncing
+  useEffect(() => {
+    // Clear any pending timeout
+    if (statusTimeoutRef.current) {
+      clearTimeout(statusTimeoutRef.current);
+    }
+
+    // Set new status with a small delay to prevent rapid changes
+    statusTimeoutRef.current = setTimeout(() => {
+      if (error) {
+        setWakeWordStatus(`Error: ${error.message}`);
+      } else if (!isReady) {
+        setWakeWordStatus("Initializing...");
+      } else if (isSessionActive) {
+        setWakeWordStatus("Session active - wake word disabled");
+      } else if (isListening) {
+        setWakeWordStatus("Ready - say 'Hi Jarvis'");
+      } else {
+        setWakeWordStatus("Paused");
+      }
+    }, 300); // 300ms debounce
 
     return () => {
-      mounted = false;
-    };
-  }, [startWakeWord]);
-
-  // Update status based on wake word state
-  useEffect(() => {
-    if (wakeWordError) {
-      setWakeWordStatus(`Error: ${wakeWordError.message}`);
-    } else if (isWakeWordReady && isWakeWordListening) {
-      setWakeWordStatus("Ready - Say 'Hi Jarvis'");
-    } else if (isWakeWordReady && !isWakeWordListening) {
-      setWakeWordStatus("Paused");
-    } else {
-      setWakeWordStatus("Initializing...");
-    }
-  }, [isWakeWordReady, isWakeWordListening, wakeWordError]);
-
-  // Handle session state changes
-  useEffect(() => {
-    const handleSessionChange = async () => {
-      try {
-        if (isSessionActive) {
-          console.log("🎯 Session active, stopping wake word");
-          await stopWakeWord();
-        } else if (isWakeWordReady) {
-          console.log("⏹️ Session ended, restarting wake word");
-          await startWakeWord();
-        }
-      } catch (err) {
-        console.error("Failed to handle session change:", err);
+      if (statusTimeoutRef.current) {
+        clearTimeout(statusTimeoutRef.current);
       }
     };
-
-    handleSessionChange();
-  }, [isSessionActive, isWakeWordReady, startWakeWord, stopWakeWord]);
+  }, [error, isReady, isListening, isSessionActive]);
 
   // Register tool functions
   useEffect(() => {
@@ -170,7 +147,7 @@ const AppContent: React.FC = () => {
           <div className="text-sm text-gray-400 mb-2">Wake Word Status:</div>
           <div
             className={`font-medium ${
-              wakeWordError ? "text-red-500" : "text-green-500"
+              error ? "text-red-500" : "text-green-500"
             }`}
           >
             {wakeWordStatus}
@@ -184,14 +161,12 @@ const AppContent: React.FC = () => {
       </motion.div>
     </main>
   );
-};
+}
 
-const App: React.FC = () => {
+export default function Page() {
   return (
     <TranslationsProvider>
-      <AppContent />
+      <PageContent />
     </TranslationsProvider>
   );
-};
-
-export default App;
+}
