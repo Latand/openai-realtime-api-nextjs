@@ -1,111 +1,58 @@
 "use client";
-
-import React, { useState, useEffect, useRef } from "react";
-import { motion } from "framer-motion";
-import useWebRTCAudioSession from "@/hooks/use-webrtc";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useWakeWord } from "@/hooks/use-wake-word";
+import useWebRTCAudioSession from "@/hooks/use-webrtc";
+import { useToolsFunctions } from "@/hooks/use-tools";
+import {
+  TranslationsProvider,
+  useTranslations,
+} from "@/components/translations-context";
 import { BroadcastButton } from "@/components/broadcast-button";
 import { StatusDisplay } from "@/components/status";
 import { tools } from "@/lib/tools";
-import { TranslationsProvider } from "@/components/translations-context";
-import { useToolsFunctions } from "@/hooks/use-tools";
+import { VoiceSelector } from "@/components/voice-select";
 
-function PageContent() {
-  // Update this variable as needed
-  const WAKE_WORD_COOLDOWN_MS = 5000;
-  const [wakeWordStatus, setWakeWordStatus] = useState("Initializing...");
-  const lastWakeWordTimeRef = useRef(0);
+export default function Page() {
+  return (
+    <TranslationsProvider>
+      <AppContent />
+    </TranslationsProvider>
+  );
+}
 
-  const { status, isSessionActive, handleStartStopClick, registerFunction } =
-    useWebRTCAudioSession("coral", tools);
+function AppContent() {
+  const [voice, setVoice] = useState("coral");
+  const { t } = useTranslations();
 
+  // Delay constants.
+  const DEBOUNCE_DELAY = 3000; // (Unused in this simplified version)
+  const MANUAL_STOP_DELAY = 10000; // Delay after manual stop before rearming auto wake word.
+  const REINIT_DELAY = 1000; // Reduced delay after natural session end before rearming wake word.
+
+  // State flags.
+  const [manualStop, setManualStop] = useState(false); // True if session was manually stopped.
+  const [autoWakeWordEnabled, setAutoWakeWordEnabled] = useState(true); // Controls auto wake word detection.
+  const [justReinitialized, setJustReinitialized] = useState(false); // True briefly after rearming wake word detection.
+
+  // Initialize the WebRTC session hook.
   const {
-    start: startWakeWord,
-    stop: stopWakeWord,
-    isReady,
-    isListening,
-    error,
-  } = useWakeWord({
-    onWakeWord: handleWakeWordDetected,
-    porcupineModel: {
-      publicPath: "/models/porcupine_params.pv",
-      customWritePath: "porcupine_model.pv",
-      forceWrite: true,
-    },
-    keywords: [
-      {
-        label: "Hi Jarvis",
-        publicPath: "/models/Hi-Jarvis.ppn",
-        sensitivity: 0.9,
-        customWritePath: "Hi-Jarvis.ppn",
-        forceWrite: true,
-      },
-    ],
-    accessKey: process.env.NEXT_PUBLIC_PICOVOICE_ACCESS_KEY || "",
-  });
+    status,
+    isSessionActive,
+    startSession,
+    handleStartStopClick,
+    registerFunction,
+  } = useWebRTCAudioSession(voice, tools);
 
-  // Add debounce timeout ref
-  const statusTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Ref to track previous session state.
+  const prevSessionActiveRef = useRef(isSessionActive);
 
+  // Initialize the tools functions hook.
   const toolsFunctions = useToolsFunctions();
-  function handleWakeWordDetected() {
-    const now = Date.now();
-    if (now - lastWakeWordTimeRef.current < WAKE_WORD_COOLDOWN_MS) {
-      return;
-    }
-    lastWakeWordTimeRef.current = now;
 
-    if (!isSessionActive) {
-      console.log("Wake word detected -> starting session.");
-      handleStartStopClick();
-    }
-  }
-
-  // Manage initial wake word start/stop
-  useEffect(() => {
-    startWakeWord().catch((err) => {
-      console.error("Error starting wake word detection:", err);
-    });
-    return () => {
-      stopWakeWord().catch((err) => {
-        console.error("Error stopping wake word detection:", err);
-      });
-    };
-  }, [startWakeWord, stopWakeWord]);
-
-  // Update UI status for the wake word with debouncing
-  useEffect(() => {
-    // Clear any pending timeout
-    if (statusTimeoutRef.current) {
-      clearTimeout(statusTimeoutRef.current);
-    }
-
-    // Set new status with a small delay to prevent rapid changes
-    statusTimeoutRef.current = setTimeout(() => {
-      if (error) {
-        setWakeWordStatus(`Error: ${error.message}`);
-      } else if (!isReady) {
-        setWakeWordStatus("Initializing...");
-      } else if (isSessionActive) {
-        setWakeWordStatus("Session active - wake word disabled");
-      } else if (isListening) {
-        setWakeWordStatus("Ready - say 'Hi Jarvis'");
-      } else {
-        setWakeWordStatus("Paused");
-      }
-    }, 300); // 300ms debounce
-
-    return () => {
-      if (statusTimeoutRef.current) {
-        clearTimeout(statusTimeoutRef.current);
-      }
-    };
-  }, [error, isReady, isListening, isSessionActive]);
-
-  // Register tool functions
+  // Register tool functions.
   useEffect(() => {
     Object.entries(toolsFunctions).forEach(([name, func]) => {
-      const functionNames: Record<string, string> = {
+      const functionNames = {
         timeFunction: "getCurrentTime",
         launchWebsite: "launchWebsite",
         copyToClipboard: "copyToClipboard",
@@ -124,8 +71,8 @@ function PageContent() {
             func as (...args: unknown[]) => Promise<{ success: boolean }>
           )(...args);
           if (result.success) {
-            console.log("🛑 Stopping voice session");
-            handleStartStopClick();
+            console.log("🛑 Manually stopping voice session");
+            onButtonClick();
           }
           return result;
         });
@@ -133,40 +80,178 @@ function PageContent() {
         registerFunction(functionNames[name], func);
       }
     });
-  }, [registerFunction, toolsFunctions, handleStartStopClick]);
+  }, [registerFunction, toolsFunctions]);
+
+  // Create a ref to hold the actual stopWakeWord function.
+  const stopWakeWordRef = useRef<() => Promise<void>>(() => Promise.resolve());
+
+  // Wake word callback: simply start a new session if conditions are met.
+  function handleWakeWord() {
+    if (isSessionActive) return;
+    if (!autoWakeWordEnabled) {
+      console.log("Auto wake word disabled; ignoring trigger.");
+      return;
+    }
+    if (justReinitialized) {
+      console.log(
+        "Ignoring wake word trigger immediately after reinitialization."
+      );
+      return;
+    }
+    console.log("Wake word detected.");
+    if (manualStop) {
+      setManualStop(false);
+    }
+    // Stop wake word detection (if running) and start a session.
+    stopWakeWordRef
+      .current()
+      .catch((err) => console.error("Error stopping wake word:", err));
+    startSession();
+  }
+
+  // Wake word configuration using the custom Hi-Jarvis model.
+  const wakeWordConfig = {
+    onWakeWord: handleWakeWord,
+    porcupineModel: {
+      publicPath: "/models/porcupine_params.pv",
+      customWritePath: "porcupine_model.pv",
+      forceWrite: true,
+    },
+    keywords: [
+      {
+        label: "Hi Jarvis",
+        publicPath: "/models/Hi-Jarvis.ppn",
+        sensitivity: 0.9,
+        customWritePath: "Hi-Jarvis.ppn",
+        forceWrite: true,
+      },
+    ],
+    accessKey: process.env.NEXT_PUBLIC_PICOVOICE_ACCESS_KEY || "",
+  };
+
+  // Initialize the wake word hook.
+  const {
+    start: startWakeWord,
+    stop: stopWakeWord,
+    isReady: wakeReady,
+    isListening: wakeListening,
+    error: wakeError,
+  } = useWakeWord(wakeWordConfig);
+
+  // Update the ref with the actual stopWakeWord function.
+  useEffect(() => {
+    stopWakeWordRef.current = stopWakeWord;
+  }, [stopWakeWord]);
+
+  // Effect: Manage wake word detection on session transitions.
+  useEffect(() => {
+    if (prevSessionActiveRef.current && !isSessionActive) {
+      console.log("Session stopped.");
+      // Only reinitialize wake word detection on a natural session end.
+      if (autoWakeWordEnabled && !manualStop) {
+        console.log(
+          "Reinitializing wake word listening after natural session end."
+        );
+        setJustReinitialized(true);
+        // Force a reset of the engine: call stopWakeWord() then startWakeWord() after a delay.
+        stopWakeWord()
+          .then(() => {
+            setTimeout(() => {
+              startWakeWord().catch((err) => {
+                console.error(
+                  "Error starting wake word after session end:",
+                  err
+                );
+              });
+              setJustReinitialized(false);
+            }, REINIT_DELAY);
+          })
+          .catch((err) => {
+            console.error(
+              "Error stopping wake word for reinitialization:",
+              err
+            );
+          });
+      } else {
+        console.log(
+          "Session stopped manually; not reinitializing wake word automatically."
+        );
+      }
+    } else if (!prevSessionActiveRef.current && isSessionActive) {
+      // When session starts, stop wake word detection.
+      stopWakeWord().catch((err) => {
+        console.error("Error stopping wake word during session:", err);
+      });
+    }
+    prevSessionActiveRef.current = isSessionActive;
+  }, [
+    isSessionActive,
+    startWakeWord,
+    stopWakeWord,
+    autoWakeWordEnabled,
+    manualStop,
+  ]);
+
+  // On mount, start wake word detection if enabled.
+  useEffect(() => {
+    if (!isSessionActive && autoWakeWordEnabled) {
+      console.log("Initial wake word start.");
+      startWakeWord().catch((err) => {
+        console.error("Error starting wake word on mount:", err);
+      });
+    }
+    return () => {
+      stopWakeWord().catch((err) => {
+        console.error("Error stopping wake word on unmount:", err);
+      });
+    };
+  }, [isSessionActive, autoWakeWordEnabled]);
+
+  // Wrapped button click handler.
+  const onButtonClick = useCallback(() => {
+    if (isSessionActive) {
+      // Manual stop: stop session, mark manualStop, disable auto wake word.
+      handleStartStopClick();
+      setManualStop(true);
+      setAutoWakeWordEnabled(false);
+      // Re-enable auto wake word detection after MANUAL_STOP_DELAY.
+      setTimeout(() => {
+        console.log("Re-enabling auto wake word after manual stop.");
+        setAutoWakeWordEnabled(true);
+        setManualStop(false);
+      }, MANUAL_STOP_DELAY);
+    } else {
+      // Manual start: start session and disable auto wake word during session.
+      handleStartStopClick();
+      setManualStop(false);
+      setAutoWakeWordEnabled(false);
+    }
+  }, [isSessionActive, handleStartStopClick]);
 
   return (
-    <main className="h-full flex items-center justify-center">
-      <motion.div
-        className="flex flex-col items-center gap-6 p-8 text-white"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-      >
-        <div className="text-center mb-4">
-          <div className="text-sm text-gray-400 mb-2">Wake Word Status:</div>
-          <div
-            className={`font-medium ${
-              error ? "text-red-500" : "text-green-500"
-            }`}
-          >
-            {wakeWordStatus}
-          </div>
-        </div>
+    <main className="h-full flex flex-col items-center justify-center p-4">
+      <div className="mb-4">
+        <VoiceSelector value={voice} onValueChange={setVoice} />
+      </div>
+      <div className="flex flex-col items-center gap-4">
+        <StatusDisplay status={status} />
         <BroadcastButton
           isSessionActive={isSessionActive}
-          onClick={handleStartStopClick}
+          onClick={onButtonClick}
         />
-        {status && <StatusDisplay status={status} />}
-      </motion.div>
+      </div>
+      {wakeError && (
+        <p className="text-red-500 mt-2">
+          Wake Word Error: {wakeError.message}
+        </p>
+      )}
+      <p className="mt-2">
+        {wakeReady
+          ? wakeListening
+            ? "Listening for wake word..."
+            : "Not listening"
+          : "Initializing wake word..."}
+      </p>
     </main>
-  );
-}
-
-export default function Page() {
-  return (
-    <TranslationsProvider>
-      <PageContent />
-    </TranslationsProvider>
   );
 }

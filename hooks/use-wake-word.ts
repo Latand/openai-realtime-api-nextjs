@@ -15,10 +15,10 @@ export interface WakeWordConfig {
 
 export function useWakeWord(config: WakeWordConfig) {
   const [isReady, setIsReady] = useState(false);
-
-  // We only want to call init() once, so we store a promise reference
   const initPromiseRef = useRef<Promise<void> | null>(null);
   const mountedRef = useRef(true);
+  const [prevKeywordDetection, setPrevKeywordDetection] =
+    useState<boolean>(false);
 
   const {
     init,
@@ -30,13 +30,11 @@ export function useWakeWord(config: WakeWordConfig) {
     keywordDetection,
   } = usePorcupine();
 
-  // Initialize porcupine
   const initialize = useCallback(async () => {
     if (!mountedRef.current) return;
     if (initPromiseRef.current) {
       return initPromiseRef.current;
     }
-
     initPromiseRef.current = (async () => {
       try {
         await init(config.accessKey, config.keywords, config.porcupineModel);
@@ -48,33 +46,29 @@ export function useWakeWord(config: WakeWordConfig) {
         throw err;
       }
     })();
-
     return initPromiseRef.current;
   }, [init, config]);
 
-  // Start detection
   const start = useCallback(async () => {
     if (!mountedRef.current) return;
-
-    // If not ready, init first
     if (!isReady) {
       await initialize();
     }
-
-    // Once ready, or after init, if not listening -> start
     if (!isListening) {
       await startPorcupine();
     }
   }, [isReady, isListening, startPorcupine, initialize]);
 
-  // Stop detection
   const stop = useCallback(async () => {
     if (isListening) {
       await stopPorcupine();
+      release();
+      setIsReady(false);
+      // Clear the initialization promise to force a fresh initialization next time.
+      initPromiseRef.current = null;
     }
-  }, [isListening, stopPorcupine]);
+  }, [isListening, stopPorcupine, release]);
 
-  // On mount/unmount
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -85,14 +79,22 @@ export function useWakeWord(config: WakeWordConfig) {
     };
   }, [release]);
 
-  // Listen for detection
+  // Reset previous detection state when engine starts listening.
+  useEffect(() => {
+    if (isListening) {
+      setPrevKeywordDetection(false);
+    }
+  }, [isListening]);
+
+  // Call onWakeWord on a fresh detection (transition from false to true).
   useEffect(() => {
     if (!mountedRef.current || !isReady) return;
-
-    if (keywordDetection && config.onWakeWord) {
+    const detected = Boolean(keywordDetection);
+    if (!prevKeywordDetection && detected && config.onWakeWord) {
       config.onWakeWord();
     }
-  }, [keywordDetection, isReady, config]);
+    setPrevKeywordDetection(detected);
+  }, [keywordDetection, isReady, config, prevKeywordDetection]);
 
   return {
     start,
