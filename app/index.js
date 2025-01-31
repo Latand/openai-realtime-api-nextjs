@@ -40,7 +40,7 @@ const child_process_1 = require("child_process");
 const util_1 = require("util");
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
 const isDevelopment = process.env.NODE_ENV !== "production";
-let mainWindow;
+let mainWindow = null;
 function createMainWindow() {
     const window = new electron_1.BrowserWindow({
         width: 800,
@@ -56,6 +56,7 @@ function createMainWindow() {
     if (isDevelopment) {
         setTimeout(() => {
             window.loadURL("http://localhost:3000");
+            window.webContents.openDevTools();
         }, 1000);
     }
     else {
@@ -101,7 +102,6 @@ async function simulateKeyPress(key) {
 async function simulatePaste() {
     if (process.platform === "linux") {
         try {
-            // Increase delay to 500ms to ensure window focus
             await new Promise((resolve) => setTimeout(resolve, 500));
             await execAsync("xdotool key ctrl+v");
         }
@@ -135,7 +135,6 @@ electron_1.ipcMain.handle("clipboard:write", async (_, text) => {
 electron_1.ipcMain.handle("clipboard:writeAndPaste", async (_, text) => {
     try {
         electron_1.clipboard.writeText(text);
-        // Wait a bit to ensure the text is in clipboard
         await new Promise((resolve) => setTimeout(resolve, 100));
         await simulatePaste();
         return { success: true };
@@ -349,23 +348,43 @@ electron_1.ipcMain.handle("system:adjustVolume", (_, percentage) => {
         });
     });
 });
-electron_1.ipcMain.handle("system:adjustSystemVolume", (_, percentage) => {
-    return new Promise((resolve) => {
-        // Format volume value as a percentage
-        const command = `wpctl set-volume @DEFAULT_AUDIO_SINK@ ${percentage}%`;
-        console.log(`[SystemVolume] Executing command: ${command}`);
-        (0, child_process_1.exec)(command, (error, stdout, stderr) => {
-            if (error) {
-                console.error(`Error: ${error.message}`);
-                resolve({ success: false, error: error.message });
-                return;
+electron_1.ipcMain.handle("system:adjustSystemVolume", async (_, percentage) => {
+    const maxRetries = 3;
+    let retryCount = 0;
+    const tryAdjustVolume = async () => {
+        try {
+            console.log(`[SystemVolume] Attempting to set volume to ${percentage}%`);
+            const command = `wpctl set-volume @DEFAULT_AUDIO_SINK@ ${percentage}%`;
+            const { stdout, stderr } = await execWithLogging(command, "SystemVolume");
+            // Verify the volume was set correctly
+            const verifyCommand = "wpctl get-volume @DEFAULT_AUDIO_SINK@";
+            const { stdout: verifyStdout } = await execWithLogging(verifyCommand, "SystemVolume");
+            if (verifyStdout.includes("Volume:")) {
+                return { success: true };
             }
-            if (stderr) {
-                console.error(`Stderr: ${stderr}`);
+            else {
+                throw new Error("Failed to verify volume change");
             }
-            console.log(`Output: ${stdout}`);
-            resolve({ success: true });
-        });
-    });
+        }
+        catch (error) {
+            console.error(`[SystemVolume] Attempt ${retryCount + 1} failed:`, error);
+            if (retryCount < maxRetries) {
+                retryCount++;
+                console.log(`[SystemVolume] Retrying... (${retryCount}/${maxRetries})`);
+                await new Promise((resolve) => setTimeout(resolve, 500)); // Wait 500ms before retry
+                return tryAdjustVolume();
+            }
+            throw error;
+        }
+    };
+    try {
+        const result = await tryAdjustVolume();
+        return result;
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+        console.error("[SystemVolume] All attempts failed:", errorMessage);
+        return { success: false, error: errorMessage };
+    }
 });
 //# sourceMappingURL=index.js.map

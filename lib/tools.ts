@@ -14,6 +14,10 @@ const toolDefinitions = {
     description: "Gets the current time in the user's timezone",
     parameters: {},
   },
+  stopSession: {
+    description: "Stops the current voice session",
+    parameters: {},
+  },
   launchWebsite: {
     description: "Launches a website in the user's browser",
     parameters: {

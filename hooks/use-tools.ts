@@ -9,6 +9,26 @@ import FirecrawlApp, { ScrapeResponse } from "@mendable/firecrawl-js";
 export const useToolsFunctions = () => {
   const { t } = useTranslations();
 
+  const stopSession = async () => {
+    try {
+      console.log("Stop session function called");
+      toast.success(t("tools.stopSession.toast") + " 🎤", {
+        description: t("tools.stopSession.success"),
+      });
+
+      return {
+        success: true,
+        message: "Voice session will be stopped",
+      };
+    } catch (error) {
+      console.error("Error in stopSession:", error);
+      return {
+        success: false,
+        message: `Failed to stop session: ${error}`,
+      };
+    }
+  };
+
   const timeFunction = () => {
     const now = new Date();
     return {
@@ -303,6 +323,39 @@ export const useToolsFunctions = () => {
       };
     }
   };
+  const adjustSystemVolume = async ({ percentage }: { percentage: number }) => {
+    try {
+      if (window.electron?.system) {
+        const result = await window.electron.system.adjustSystemVolume(
+          percentage
+        );
+        if (result.success) {
+          toast.success(t("tools.volume.toast") + " 🔊", {
+            description: t("tools.volume.success") + ` ${percentage}%`,
+          });
+          return {
+            success: true,
+            message: `System volume adjusted to ${percentage}%`,
+          };
+        } else {
+          throw new Error(result.error || "Failed to adjust system volume");
+        }
+      }
+      return {
+        success: false,
+        message: "System control not available in web mode",
+      };
+    } catch (error) {
+      console.error("Failed to adjust system volume:", error);
+      toast.error(t("tools.volume.error") + " ❌", {
+        description: String(error),
+      });
+      return {
+        success: false,
+        message: `Failed to adjust system volume: ${error}`,
+      };
+    }
+  };
 
   return {
     timeFunction,
@@ -314,5 +367,7 @@ export const useToolsFunctions = () => {
     controlMusic,
     adjustVolume,
     scrapeWebsite,
+    stopSession,
+    adjustSystemVolume,
   };
 };

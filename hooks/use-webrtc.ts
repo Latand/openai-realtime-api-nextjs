@@ -82,6 +82,23 @@ export default function useWebRTCAudioSession(
    * Configure the data channel on open, sending a session update to the server.
    */
   function configureDataChannel(dataChannel: RTCDataChannel) {
+    // Add error handling for data channel
+    dataChannel.onerror = async (error) => {
+      console.error("Data channel error:", error);
+      if (isSessionActive) {
+        console.log("Attempting to reconnect due to data channel error...");
+        await startSession();
+      }
+    };
+
+    dataChannel.onclose = async () => {
+      console.log("Data channel closed");
+      if (isSessionActive) {
+        console.log("Attempting to reconnect due to data channel closure...");
+        await startSession();
+      }
+    };
+
     // Send session update
     const sessionUpdate = {
       type: "session.update",
@@ -172,6 +189,15 @@ export default function useWebRTCAudioSession(
     try {
       const msg = JSON.parse(event.data);
       // console.log("Incoming dataChannel message:", msg);
+
+      // Add automatic reconnection if data channel closes unexpectedly
+      if (dataChannelRef.current?.readyState === "closed" && isSessionActive) {
+        console.log(
+          "Data channel closed unexpectedly, attempting to reconnect..."
+        );
+        await startSession();
+        return;
+      }
 
       switch (msg.type) {
         /**
@@ -386,6 +412,14 @@ export default function useWebRTCAudioSession(
    */
   async function startSession() {
     try {
+      // If there's an existing active session, clean it up first
+      if (isSessionActive) {
+        stopSession();
+        // Small delay to ensure cleanup is complete
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
+      setStatus("Starting session...");
       setStatus("Requesting microphone access...");
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioStreamRef.current = stream;
