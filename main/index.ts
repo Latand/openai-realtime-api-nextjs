@@ -17,20 +17,20 @@ let mainWindow: BrowserWindow | null;
 
 function createMainWindow() {
   const window = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 800,
+    height: 600,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, "preload.js"),
     },
+    autoHideMenuBar: true,
+    frame: true,
   });
 
   if (isDevelopment) {
-    // Wait a bit before loading URL to ensure dev server is ready
     setTimeout(() => {
       window.loadURL("http://localhost:3000");
-      window.webContents.openDevTools();
     }, 1000);
   } else {
     window.loadURL(
