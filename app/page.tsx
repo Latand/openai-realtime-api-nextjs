@@ -11,6 +11,7 @@ import { BroadcastButton } from "@/components/broadcast-button";
 import { StatusDisplay } from "@/components/status";
 import { tools } from "@/lib/tools";
 import { VoiceSelector } from "@/components/voice-select";
+import { playSound } from "@/lib/tools";
 
 const debug = (...args: unknown[]) => {
   if (process.env.NODE_ENV === "development") {
@@ -58,7 +59,7 @@ function AppContent() {
   // Register tool functions.
   useEffect(() => {
     Object.entries(toolsFunctions).forEach(([name, func]) => {
-      const functionNames = {
+      const functionNames: Record<string, string> = {
         timeFunction: "getCurrentTime",
         launchWebsite: "launchWebsite",
         copyToClipboard: "copyToClipboard",
@@ -85,6 +86,7 @@ function AppContent() {
           if (result.success) {
             console.log("🛑 Manually stopping voice session");
             onButtonClick();
+            playSound("/sounds/session-end.mp3");
           }
           return result;
         });
@@ -101,6 +103,7 @@ function AppContent() {
   function handleWakeWord() {
     console.log("[AppContent] handleWakeWord triggered.");
     if (isSessionActive) return;
+    playSound("/sounds/on-wakeword.mp3");
     startSession();
     // if (!autoWakeWordEnabled) {
     //   console.log("Auto wake word disabled; ignoring trigger.");
@@ -266,6 +269,7 @@ function AppContent() {
       // setDetected(true);
       handleStartStopClick();
       setManualStop(false);
+      playSound("/sounds/on-wakeword.mp3");
       startSession();
       console.log("Button clicked with session INACTIVE.");
       // setAutoWakeWordEnabled(false);
@@ -276,6 +280,26 @@ function AppContent() {
     startWakeWord();
     return () => {};
   }, []);
+
+  // Play app initialization sound when AppContent mounts
+  useEffect(() => {
+    // Add a small delay before playing the initial sound
+    const timer = setTimeout(() => {
+      playSound("/sounds/app-init.mp3");
+    }, 500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Play sounds on session state change
+  useEffect(() => {
+    if (!isSessionActive && justReinitialized) {
+      playSound("/sounds/session-end.mp3");
+    }
+    if (isSessionActive) {
+      playSound("/sounds/session-start.mp3");
+      prevSessionActiveRef.current = isSessionActive;
+    }
+  }, [isSessionActive]);
 
   return (
     <main className="h-full flex flex-col items-center justify-center p-4">

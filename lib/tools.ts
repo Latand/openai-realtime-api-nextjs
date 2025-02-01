@@ -97,3 +97,34 @@ const tools: Tool[] = Object.entries(toolDefinitions).map(([name, config]) => ({
 
 export type { Tool };
 export { tools };
+
+let audioContext: AudioContext | null = null;
+
+export function playSound(soundFile: string): void {
+  const initAudioContext = () => {
+    if (!audioContext) {
+      audioContext = new AudioContext();
+    }
+    return audioContext.state === "running";
+  };
+
+  const tryPlaySound = async (retries = 3, delay = 100) => {
+    try {
+      // Ensure audio context is initialized
+      if (!initAudioContext()) {
+        await audioContext?.resume();
+      }
+
+      const audio = new Audio(soundFile);
+      await audio.play();
+    } catch (err) {
+      console.error("Error playing sound:", err);
+      if (retries > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        await tryPlaySound(retries - 1, delay * 1.5);
+      }
+    }
+  };
+
+  tryPlaySound();
+}
