@@ -12,6 +12,12 @@ import { StatusDisplay } from "@/components/status";
 import { tools } from "@/lib/tools";
 import { VoiceSelector } from "@/components/voice-select";
 
+const debug = (...args: unknown[]) => {
+  if (process.env.NODE_ENV === "development") {
+    console.log("[AppContent Debug]", ...args);
+  }
+};
+
 export default function Page() {
   return (
     <TranslationsProvider>
@@ -22,11 +28,11 @@ export default function Page() {
 
 function AppContent() {
   const [voice, setVoice] = useState("coral");
-  const { t } = useTranslations();
+  debug("AppContent initialized with voice:", voice);
 
   // Delay constants.
   const DEBOUNCE_DELAY = 3000; // (Unused in this simplified version)
-  const MANUAL_STOP_DELAY = 10000; // Delay after manual stop before rearming auto wake word.
+  const MANUAL_STOP_DELAY = 1000; // Delay after manual stop before rearming auto wake word.
   const REINIT_DELAY = 1000; // Reduced delay after natural session end before rearming wake word.
 
   // State flags.
@@ -57,13 +63,19 @@ function AppContent() {
         launchWebsite: "launchWebsite",
         copyToClipboard: "copyToClipboard",
         scrapeWebsite: "scrapeWebsite",
-        pressEnter: "pressEnter",
+        pasteText: "pasteText",
         openSpotify: "openSpotify",
         controlMusic: "controlMusic",
         adjustVolume: "adjustVolume",
         adjustSystemVolume: "adjustSystemVolume",
         stopSession: "stopSession",
       };
+      console.log(
+        "[AppContent] Registering tool function:",
+        functionNames[name],
+        "for key:",
+        name
+      );
 
       if (name === "stopSession") {
         registerFunction(functionNames[name], async (...args: unknown[]) => {
@@ -87,18 +99,20 @@ function AppContent() {
 
   // Wake word callback: simply start a new session if conditions are met.
   function handleWakeWord() {
+    console.log("[AppContent] handleWakeWord triggered.");
     if (isSessionActive) return;
-    if (!autoWakeWordEnabled) {
-      console.log("Auto wake word disabled; ignoring trigger.");
-      return;
-    }
+    startSession();
+    // if (!autoWakeWordEnabled) {
+    //   console.log("Auto wake word disabled; ignoring trigger.");
+    //   return;
+    // }
     if (justReinitialized) {
       console.log(
-        "Ignoring wake word trigger immediately after reinitialization."
+        "[AppContent] Ignoring wake word trigger immediately after reinitialization."
       );
       return;
     }
-    console.log("Wake word detected.");
+    console.log("[AppContent] Wake word detected.");
     if (manualStop) {
       setManualStop(false);
     }
@@ -106,11 +120,11 @@ function AppContent() {
     stopWakeWordRef
       .current()
       .catch((err) => console.error("Error stopping wake word:", err));
-    startSession();
   }
 
   // Wake word configuration using the custom Hi-Jarvis model.
   const wakeWordConfig = {
+    sessionActive: isSessionActive,
     onWakeWord: handleWakeWord,
     porcupineModel: {
       publicPath: "/models/porcupine_params.pv",
@@ -131,11 +145,14 @@ function AppContent() {
 
   // Initialize the wake word hook.
   const {
-    start: startWakeWord,
-    stop: stopWakeWord,
+    release,
+    startPorcupine: startWakeWord,
+    stopPorcupine: stopWakeWord,
     isReady: wakeReady,
     isListening: wakeListening,
     error: wakeError,
+    reinitializeEngine,
+    detected,
   } = useWakeWord(wakeWordConfig);
 
   // Update the ref with the actual stopWakeWord function.
@@ -145,12 +162,18 @@ function AppContent() {
 
   // Effect: Manage wake word detection on session transitions.
   useEffect(() => {
+    console.log(
+      "[AppContent] Session transition detected. Previous active:",
+      prevSessionActiveRef.current,
+      "Current active:",
+      isSessionActive
+    );
     if (prevSessionActiveRef.current && !isSessionActive) {
-      console.log("Session stopped.");
+      console.log("[AppContent] Session stopped.");
       // Only reinitialize wake word detection on a natural session end.
       if (autoWakeWordEnabled && !manualStop) {
         console.log(
-          "Reinitializing wake word listening after natural session end."
+          "[AppContent] Reinitializing wake word listening after natural session end."
         );
         setJustReinitialized(true);
         // Force a reset of the engine: call stopWakeWord() then startWakeWord() after a delay.
@@ -159,7 +182,7 @@ function AppContent() {
             setTimeout(() => {
               startWakeWord().catch((err) => {
                 console.error(
-                  "Error starting wake word after session end:",
+                  "[AppContent] Error starting wake word after session end:",
                   err
                 );
               });
@@ -168,19 +191,29 @@ function AppContent() {
           })
           .catch((err) => {
             console.error(
-              "Error stopping wake word for reinitialization:",
+              "[AppContent] Error stopping wake word for reinitialization:",
               err
             );
           });
       } else {
         console.log(
-          "Session stopped manually; not reinitializing wake word automatically."
+          "[AppContent] Session stopped manually; not reinitializing wake word automatically."
         );
+        // Set justReinitialized to true briefly then reset it to false so that wake word triggering works later.
+        setJustReinitialized(true);
+        // setTimeout(() => {
+        //   setJustReinitialized(false);
+        // }, MANUAL_STOP_DELAY);
       }
     } else if (!prevSessionActiveRef.current && isSessionActive) {
-      // When session starts, stop wake word detection.
+      console.log(
+        "[AppContent] Session started. Stopping wake word detection."
+      );
       stopWakeWord().catch((err) => {
-        console.error("Error stopping wake word during session:", err);
+        console.error(
+          "[AppContent] Error stopping wake word during session:",
+          err
+        );
       });
     }
     prevSessionActiveRef.current = isSessionActive;
@@ -192,41 +225,57 @@ function AppContent() {
     manualStop,
   ]);
 
-  // On mount, start wake word detection if enabled.
-  useEffect(() => {
-    if (!isSessionActive && autoWakeWordEnabled) {
-      console.log("Initial wake word start.");
-      startWakeWord().catch((err) => {
-        console.error("Error starting wake word on mount:", err);
-      });
-    }
-    return () => {
-      stopWakeWord().catch((err) => {
-        console.error("Error stopping wake word on unmount:", err);
-      });
-    };
-  }, [isSessionActive, autoWakeWordEnabled]);
+  // // On mount, start wake word detection if enabled.
+  // useEffect(() => {
+  //   console.log("[AppContent] useEffect detected:", detected);
+  //   if (!isSessionActive && detected) {
+  //     // startSession();
+  //     startWakeWord().catch((err) => {
+  //       console.error("[AppContent] Error starting wake word on mount:", err);
+  //     });
+  //   }
+  //   return () => {
+  //     console.log(
+  //       "[AppContent] Component unmounting, stopping wake word detection."
+  //     );
+  //     stopWakeWord().catch((err) => {
+  //       console.error("[AppContent] Error stopping wake word on unmount:", err);
+  //     });
+  //   };
+  // }, [isSessionActive]);
 
   // Wrapped button click handler.
   const onButtonClick = useCallback(() => {
+    console.log("Button clicked with detected:", detected);
     if (isSessionActive) {
       // Manual stop: stop session, mark manualStop, disable auto wake word.
       handleStartStopClick();
       setManualStop(true);
       setAutoWakeWordEnabled(false);
       // Re-enable auto wake word detection after MANUAL_STOP_DELAY.
-      setTimeout(() => {
-        console.log("Re-enabling auto wake word after manual stop.");
-        setAutoWakeWordEnabled(true);
-        setManualStop(false);
-      }, MANUAL_STOP_DELAY);
+      // release();
+      reinitializeEngine();
+      // setTimeout(() => {
+      //   console.log("Re-enabling auto wake word after manual stop.");
+      //   setAutoWakeWordEnabled(true);
+      //   setManualStop(false);
+      // }, MANUAL_STOP_DELAY);
+      console.log("Button clicked with session active.");
     } else {
       // Manual start: start session and disable auto wake word during session.
+      // setDetected(true);
       handleStartStopClick();
       setManualStop(false);
-      setAutoWakeWordEnabled(false);
+      startSession();
+      console.log("Button clicked with session INACTIVE.");
+      // setAutoWakeWordEnabled(false);
     }
   }, [isSessionActive, handleStartStopClick]);
+
+  useEffect(() => {
+    startWakeWord();
+    return () => {};
+  }, []);
 
   return (
     <main className="h-full flex flex-col items-center justify-center p-4">
@@ -237,6 +286,7 @@ function AppContent() {
         <StatusDisplay status={status} />
         <BroadcastButton
           isSessionActive={isSessionActive}
+          detected={Boolean(detected)}
           onClick={onButtonClick}
         />
       </div>

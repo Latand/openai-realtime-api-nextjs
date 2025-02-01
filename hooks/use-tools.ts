@@ -359,8 +359,6 @@ export const useToolsFunctions = () => {
 
   return {
     timeFunction,
-    backgroundFunction,
-    partyFunction,
     launchWebsite,
     pasteText,
     openSpotify,

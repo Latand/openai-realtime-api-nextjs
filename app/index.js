@@ -43,7 +43,7 @@ const isDevelopment = process.env.NODE_ENV !== "production";
 let mainWindow = null;
 function createMainWindow() {
     const window = new electron_1.BrowserWindow({
-        width: 800,
+        width: 1600,
         height: 600,
         webPreferences: {
             nodeIntegration: false,
