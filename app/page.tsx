@@ -13,6 +13,29 @@ import { tools } from "@/lib/tools";
 import { VoiceSelector } from "@/components/voice-select";
 import { playSound } from "@/lib/tools";
 
+// Constants
+const REINIT_DELAY = 1000;
+const INIT_SOUND_DELAY = 500;
+
+// Types
+type WakeWordConfig = {
+  sessionActive: boolean;
+  onWakeWord: () => void;
+  porcupineModel: {
+    publicPath: string;
+    customWritePath: string;
+    forceWrite: boolean;
+  };
+  keywords: Array<{
+    label: string;
+    publicPath: string;
+    sensitivity: number;
+    customWritePath: string;
+    forceWrite: boolean;
+  }>;
+  accessKey: string;
+};
+
 const debug = (...args: unknown[]) => {
   if (process.env.NODE_ENV === "development") {
     console.log("[AppContent Debug]", ...args);
@@ -27,52 +50,28 @@ export default function Page() {
   );
 }
 
-function AppContent() {
-  const [voice, setVoice] = useState("coral");
-  debug("AppContent initialized with voice:", voice);
-
-  // Delay constants.
-  const DEBOUNCE_DELAY = 3000; // (Unused in this simplified version)
-  const MANUAL_STOP_DELAY = 1000; // Delay after manual stop before rearming auto wake word.
-  const REINIT_DELAY = 1000; // Reduced delay after natural session end before rearming wake word.
-
-  // State flags.
-  const [manualStop, setManualStop] = useState(false); // True if session was manually stopped.
-  const [autoWakeWordEnabled, setAutoWakeWordEnabled] = useState(true); // Controls auto wake word detection.
-  const [justReinitialized, setJustReinitialized] = useState(false); // True briefly after rearming wake word detection.
-
-  // Initialize the WebRTC session hook.
-  const {
-    status,
-    isSessionActive,
-    startSession,
-    handleStartStopClick,
-    registerFunction,
-  } = useWebRTCAudioSession(voice, tools);
-
-  // Ref to track previous session state.
-  const prevSessionActiveRef = useRef(isSessionActive);
-
-  // Initialize the tools functions hook.
-  const toolsFunctions = useToolsFunctions();
-
-  // Register tool functions.
+function useToolRegistration(
+  registerFunction: (name: string, func: Function) => void,
+  toolsFunctions: Record<string, Function>,
+  stopSessionHandler: () => void
+) {
   useEffect(() => {
+    const functionNames: Record<string, string> = {
+      timeFunction: "getCurrentTime",
+      launchWebsite: "launchWebsite",
+      copyToClipboard: "copyToClipboard",
+      scrapeWebsite: "scrapeWebsite",
+      pasteText: "pasteText",
+      openSpotify: "openSpotify",
+      controlMusic: "controlMusic",
+      adjustVolume: "adjustVolume",
+      adjustSystemVolume: "adjustSystemVolume",
+      stopSession: "stopSession",
+    };
+
     Object.entries(toolsFunctions).forEach(([name, func]) => {
-      const functionNames: Record<string, string> = {
-        timeFunction: "getCurrentTime",
-        launchWebsite: "launchWebsite",
-        copyToClipboard: "copyToClipboard",
-        scrapeWebsite: "scrapeWebsite",
-        pasteText: "pasteText",
-        openSpotify: "openSpotify",
-        controlMusic: "controlMusic",
-        adjustVolume: "adjustVolume",
-        adjustSystemVolume: "adjustSystemVolume",
-        stopSession: "stopSession",
-      };
-      console.log(
-        "[AppContent] Registering tool function:",
+      debug(
+        "Registering tool function:",
         functionNames[name],
         "for key:",
         name
@@ -85,8 +84,8 @@ function AppContent() {
           )(...args);
           if (result.success) {
             console.log("🛑 Manually stopping voice session");
-            onButtonClick();
-            playSound("/sounds/session-end.mp3");
+            stopSessionHandler();
+            return result;
           }
           return result;
         });
@@ -95,35 +94,11 @@ function AppContent() {
       }
     });
   }, [registerFunction, toolsFunctions]);
+}
 
-  // Create a ref to hold the actual stopWakeWord function.
-  const stopWakeWordRef = useRef<() => Promise<void>>(() => Promise.resolve());
-
-  // Wake word callback: simply start a new session if conditions are met.
-  function handleWakeWord() {
-    console.log("[AppContent] handleWakeWord triggered.");
-    if (isSessionActive) return;
-    playSound("/sounds/on-wakeword.mp3");
-    startSession();
-    if (justReinitialized) {
-      console.log(
-        "[AppContent] Ignoring wake word trigger immediately after reinitialization."
-      );
-      return;
-    }
-    console.log("[AppContent] Wake word detected.");
-    if (manualStop) {
-      setManualStop(false);
-    }
-    // Stop wake word detection (if running) and start a session.
-    stopWakeWordRef
-      .current()
-      .catch((err) => console.error("Error stopping wake word:", err));
-  }
-
-  // Wake word configuration using the custom Hi-Jarvis model.
-  const wakeWordConfig = {
-    sessionActive: isSessionActive,
+function useWakeWordConfig(handleWakeWord: () => void): WakeWordConfig {
+  return {
+    sessionActive: false,
     onWakeWord: handleWakeWord,
     porcupineModel: {
       publicPath: "/models/porcupine_params.pv",
@@ -141,8 +116,76 @@ function AppContent() {
     ],
     accessKey: process.env.NEXT_PUBLIC_PICOVOICE_ACCESS_KEY || "",
   };
+}
 
-  // Initialize the wake word hook.
+function useSoundEffects(isSessionActive: boolean, justReinitialized: boolean) {
+  const prevSessionActiveRef = useRef(isSessionActive);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      playSound("/sounds/app-init.mp3");
+    }, INIT_SOUND_DELAY);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!isSessionActive && justReinitialized) {
+      playSound("/sounds/session-end.mp3");
+    }
+    if (isSessionActive) {
+      playSound("/sounds/session-start.mp3");
+      prevSessionActiveRef.current = isSessionActive;
+    }
+  }, [isSessionActive, justReinitialized]);
+}
+
+function AppContent() {
+  // State management
+  const [voice, setVoice] = useState("coral");
+  const [manualStop, setManualStop] = useState(false);
+  const [autoWakeWordEnabled, setAutoWakeWordEnabled] = useState(true);
+  const [justReinitialized, setJustReinitialized] = useState(false);
+
+  debug("AppContent initialized with voice:", voice);
+
+  // Initialize WebRTC session
+  const {
+    status,
+    isSessionActive,
+    startSession,
+    handleStartStopClick,
+    registerFunction,
+  } = useWebRTCAudioSession(voice, tools);
+
+  const prevSessionActiveRef = useRef(isSessionActive);
+  const toolsFunctions = useToolsFunctions();
+  const stopWakeWordRef = useRef<() => Promise<void>>(() => Promise.resolve());
+
+  // Handle wake word detection
+  const handleWakeWord = useCallback(() => {
+    debug("handleWakeWord triggered.");
+    if (isSessionActive) return;
+
+    playSound("/sounds/on-wakeword.mp3");
+    startSession();
+
+    if (justReinitialized) {
+      debug("Ignoring wake word trigger immediately after reinitialization.");
+      return;
+    }
+
+    debug("Wake word detected.");
+    if (manualStop) {
+      setManualStop(false);
+    }
+
+    stopWakeWordRef
+      .current()
+      .catch((err) => console.error("Error stopping wake word:", err));
+  }, [isSessionActive, justReinitialized, manualStop, startSession]);
+
+  const wakeWordConfig = useWakeWordConfig(handleWakeWord);
+
   const {
     release,
     startPorcupine: startWakeWord,
@@ -154,34 +197,30 @@ function AppContent() {
     detected,
   } = useWakeWord(wakeWordConfig);
 
-  // Update the ref with the actual stopWakeWord function.
   useEffect(() => {
     stopWakeWordRef.current = stopWakeWord;
   }, [stopWakeWord]);
 
-  // Effect: Manage wake word detection on session transitions.
+  // Manage wake word detection on session transitions
   useEffect(() => {
-    console.log(
-      "[AppContent] Session transition detected. Previous active:",
-      prevSessionActiveRef.current,
-      "Current active:",
-      isSessionActive
-    );
+    debug("Session transition detected.", {
+      prev: prevSessionActiveRef.current,
+      current: isSessionActive,
+    });
+
     if (prevSessionActiveRef.current && !isSessionActive) {
-      console.log("[AppContent] Session stopped.");
-      // Only reinitialize wake word detection on a natural session end.
+      debug("Session stopped.");
+
       if (autoWakeWordEnabled && !manualStop) {
-        console.log(
-          "[AppContent] Reinitializing wake word listening after natural session end."
-        );
+        debug("Reinitializing wake word listening after natural session end.");
         setJustReinitialized(true);
-        // Force a reset of the engine: call stopWakeWord() then startWakeWord() after a delay.
+
         stopWakeWord()
           .then(() => {
             setTimeout(() => {
               startWakeWord().catch((err) => {
                 console.error(
-                  "[AppContent] Error starting wake word after session end:",
+                  "Error starting wake word after session end:",
                   err
                 );
               });
@@ -190,26 +229,20 @@ function AppContent() {
           })
           .catch((err) => {
             console.error(
-              "[AppContent] Error stopping wake word for reinitialization:",
+              "Error stopping wake word for reinitialization:",
               err
             );
           });
       } else {
-        console.log(
-          "[AppContent] Session stopped manually; not reinitializing wake word automatically."
+        debug(
+          "Session stopped manually; not reinitializing wake word automatically."
         );
-        // Set justReinitialized to true briefly then reset it to false so that wake word triggering works later.
         setJustReinitialized(true);
       }
     } else if (!prevSessionActiveRef.current && isSessionActive) {
-      console.log(
-        "[AppContent] Session started. Stopping wake word detection."
-      );
+      debug("Session started. Stopping wake word detection.");
       stopWakeWord().catch((err) => {
-        console.error(
-          "[AppContent] Error stopping wake word during session:",
-          err
-        );
+        console.error("Error stopping wake word during session:", err);
       });
     }
     prevSessionActiveRef.current = isSessionActive;
@@ -221,50 +254,39 @@ function AppContent() {
     manualStop,
   ]);
 
-  // Wrapped button click handler.
+  // Handle button click
   const onButtonClick = useCallback(() => {
-    console.log("Button clicked with detected:", detected);
+    debug("Button clicked with detected:", detected);
+
     if (isSessionActive) {
-      // Manual stop: stop session, mark manualStop, disable auto wake word.
       handleStartStopClick();
       setManualStop(true);
       setAutoWakeWordEnabled(false);
       reinitializeEngine();
-      console.log("Button clicked with session active.");
+      debug("Button clicked with session active.");
     } else {
-      // Manual start: start session and disable auto wake word during session.
       handleStartStopClick();
       setManualStop(false);
       playSound("/sounds/on-wakeword.mp3");
       startSession();
-      console.log("Button clicked with session INACTIVE.");
+      debug("Button clicked with session INACTIVE.");
     }
-  }, [isSessionActive, handleStartStopClick]);
-
+  }, [
+    isSessionActive,
+    handleStartStopClick,
+    detected,
+    reinitializeEngine,
+    startSession,
+  ]);
+  // Register tool functions
+  useToolRegistration(registerFunction, toolsFunctions, onButtonClick);
   useEffect(() => {
     startWakeWord();
     return () => {};
-  }, []);
+  }, [startWakeWord]);
 
-  // Play app initialization sound when AppContent mounts
-  useEffect(() => {
-    // Add a small delay before playing the initial sound
-    const timer = setTimeout(() => {
-      playSound("/sounds/app-init.mp3");
-    }, 500);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Play sounds on session state change
-  useEffect(() => {
-    if (!isSessionActive && justReinitialized) {
-      playSound("/sounds/session-end.mp3");
-    }
-    if (isSessionActive) {
-      playSound("/sounds/session-start.mp3");
-      prevSessionActiveRef.current = isSessionActive;
-    }
-  }, [isSessionActive]);
+  // Handle sound effects
+  useSoundEffects(isSessionActive, justReinitialized);
 
   return (
     <main className="h-full flex flex-col items-center justify-center p-4">
