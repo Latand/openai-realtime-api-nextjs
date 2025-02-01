@@ -105,10 +105,6 @@ function AppContent() {
     if (isSessionActive) return;
     playSound("/sounds/on-wakeword.mp3");
     startSession();
-    // if (!autoWakeWordEnabled) {
-    //   console.log("Auto wake word disabled; ignoring trigger.");
-    //   return;
-    // }
     if (justReinitialized) {
       console.log(
         "[AppContent] Ignoring wake word trigger immediately after reinitialization."
@@ -204,9 +200,6 @@ function AppContent() {
         );
         // Set justReinitialized to true briefly then reset it to false so that wake word triggering works later.
         setJustReinitialized(true);
-        // setTimeout(() => {
-        //   setJustReinitialized(false);
-        // }, MANUAL_STOP_DELAY);
       }
     } else if (!prevSessionActiveRef.current && isSessionActive) {
       console.log(
@@ -228,25 +221,6 @@ function AppContent() {
     manualStop,
   ]);
 
-  // // On mount, start wake word detection if enabled.
-  // useEffect(() => {
-  //   console.log("[AppContent] useEffect detected:", detected);
-  //   if (!isSessionActive && detected) {
-  //     // startSession();
-  //     startWakeWord().catch((err) => {
-  //       console.error("[AppContent] Error starting wake word on mount:", err);
-  //     });
-  //   }
-  //   return () => {
-  //     console.log(
-  //       "[AppContent] Component unmounting, stopping wake word detection."
-  //     );
-  //     stopWakeWord().catch((err) => {
-  //       console.error("[AppContent] Error stopping wake word on unmount:", err);
-  //     });
-  //   };
-  // }, [isSessionActive]);
-
   // Wrapped button click handler.
   const onButtonClick = useCallback(() => {
     console.log("Button clicked with detected:", detected);
@@ -255,24 +229,15 @@ function AppContent() {
       handleStartStopClick();
       setManualStop(true);
       setAutoWakeWordEnabled(false);
-      // Re-enable auto wake word detection after MANUAL_STOP_DELAY.
-      // release();
       reinitializeEngine();
-      // setTimeout(() => {
-      //   console.log("Re-enabling auto wake word after manual stop.");
-      //   setAutoWakeWordEnabled(true);
-      //   setManualStop(false);
-      // }, MANUAL_STOP_DELAY);
       console.log("Button clicked with session active.");
     } else {
       // Manual start: start session and disable auto wake word during session.
-      // setDetected(true);
       handleStartStopClick();
       setManualStop(false);
       playSound("/sounds/on-wakeword.mp3");
       startSession();
       console.log("Button clicked with session INACTIVE.");
-      // setAutoWakeWordEnabled(false);
     }
   }, [isSessionActive, handleStartStopClick]);
 
