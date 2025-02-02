@@ -1,10 +1,11 @@
 "use client";
 
 import { toast } from "sonner";
-import confetti from "canvas-confetti";
-import { animate as framerAnimate } from "framer-motion";
 import { useTranslations } from "@/components/translations-context";
 import FirecrawlApp, { ScrapeResponse } from "@mendable/firecrawl-js";
+import { mcpClient } from "@/lib/mcp-client";
+import { useState, useEffect } from "react";
+import type { Tool } from "@/hooks/use-webrtc";
 
 export const useToolsFunctions = () => {
   const { t } = useTranslations();
@@ -42,149 +43,6 @@ export const useToolsFunctions = () => {
         Intl.DateTimeFormat().resolvedOptions().timeZone +
         " timezone.",
     };
-  };
-
-  const backgroundFunction = () => {
-    try {
-      const html = document.documentElement;
-      const currentTheme = html.classList.contains("dark") ? "dark" : "light";
-      const newTheme = currentTheme === "dark" ? "light" : "dark";
-
-      html.classList.remove(currentTheme);
-      html.classList.add(newTheme);
-
-      toast(`Switched to ${newTheme} mode! 🌓`, {
-        description: t("tools.switchTheme") + newTheme + ".",
-      });
-
-      return {
-        success: true,
-        theme: newTheme,
-        message: t("tools.switchTheme") + newTheme + ".",
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: t("tools.themeFailed") + ": " + error,
-      };
-    }
-  };
-
-  const partyFunction = () => {
-    try {
-      const duration = 5 * 1000;
-      const colors = [
-        "#a786ff",
-        "#fd8bbc",
-        "#eca184",
-        "#f8deb1",
-        "#3b82f6",
-        "#14b8a6",
-        "#f97316",
-        "#10b981",
-        "#facc15",
-      ];
-
-      const confettiConfig = {
-        particleCount: 30,
-        spread: 100,
-        startVelocity: 90,
-        colors,
-        gravity: 0.5,
-      };
-
-      const shootConfetti = (
-        angle: number,
-        origin: { x: number; y: number }
-      ) => {
-        confetti({
-          ...confettiConfig,
-          angle,
-          origin,
-        });
-      };
-
-      const animate = () => {
-        const now = Date.now();
-        const end = now + duration;
-
-        const elements = document.querySelectorAll(
-          "div, p, button, h1, h2, h3"
-        );
-        elements.forEach((element) => {
-          framerAnimate(
-            element,
-            {
-              scale: [1, 1.1, 1],
-              rotate: [0, 5, -5, 0],
-            },
-            {
-              duration: 0.5,
-              repeat: 10,
-              ease: "easeInOut",
-            }
-          );
-        });
-
-        const frame = () => {
-          if (Date.now() > end) return;
-          shootConfetti(60, { x: 0, y: 0.5 });
-          shootConfetti(120, { x: 1, y: 0.5 });
-          requestAnimationFrame(frame);
-        };
-
-        const mainElement = document.querySelector("main");
-        if (mainElement) {
-          mainElement.classList.remove(
-            "bg-gradient-to-b",
-            "from-gray-50",
-            "to-white"
-          );
-          const originalBg = mainElement.style.backgroundColor;
-
-          const changeColor = () => {
-            const now = Date.now();
-            const end = now + duration;
-
-            const colorCycle = () => {
-              if (Date.now() > end) {
-                framerAnimate(
-                  mainElement,
-                  { backgroundColor: originalBg },
-                  { duration: 0.5 }
-                );
-                return;
-              }
-              const newColor =
-                colors[Math.floor(Math.random() * colors.length)];
-              framerAnimate(
-                mainElement,
-                { backgroundColor: newColor },
-                { duration: 0.2 }
-              );
-              setTimeout(colorCycle, 200);
-            };
-
-            colorCycle();
-          };
-
-          changeColor();
-        }
-
-        frame();
-      };
-
-      animate();
-      toast.success(t("tools.partyMode.toast") + " 🎉", {
-        description: t("tools.partyMode.description"),
-      });
-      return { success: true, message: t("tools.partyMode.success") + " 🎉" };
-    } catch (error) {
-      return {
-        success: false,
-        message: t("tools.partyMode.failed") + ": " + error,
-      };
-    }
   };
 
   const launchWebsite = ({ url }: { url: string }) => {
@@ -226,69 +84,6 @@ export const useToolsFunctions = () => {
     }
   };
 
-  const openSpotify = async () => {
-    try {
-      if (window.electron?.system) {
-        await window.electron.system.openSpotify();
-        return {
-          success: true,
-          message: "Opened Spotify",
-        };
-      }
-      return {
-        success: false,
-        message: "System control not available in web mode",
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: `Failed to open Spotify: ${error}`,
-      };
-    }
-  };
-
-  const controlMusic = async ({ action }: { action: "play" | "pause" }) => {
-    try {
-      if (window.electron?.system) {
-        await window.electron.system.controlMusic(action);
-        return {
-          success: true,
-          message: `Music ${action}ed successfully`,
-        };
-      }
-      return {
-        success: false,
-        message: "System control not available in web mode",
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: `Failed to ${action} music: ${error}`,
-      };
-    }
-  };
-
-  const adjustVolume = async ({ percentage }: { percentage: number }) => {
-    try {
-      if (window.electron?.system) {
-        await window.electron.system.adjustVolume(percentage);
-        return {
-          success: true,
-          message: `Volume adjusted by ${percentage}%`,
-        };
-      }
-      return {
-        success: false,
-        message: "System control not available in web mode",
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: `Failed to adjust volume: ${error}`,
-      };
-    }
-  };
-
   const scrapeWebsite = async ({ url }: { url: string }) => {
     const apiKey = process.env.NEXT_PUBLIC_FIRECRAWL_API_KEY;
     try {
@@ -323,6 +118,7 @@ export const useToolsFunctions = () => {
       };
     }
   };
+
   const adjustSystemVolume = async ({ percentage }: { percentage: number }) => {
     try {
       if (window.electron?.system) {
@@ -357,15 +153,282 @@ export const useToolsFunctions = () => {
     }
   };
 
+  const spotifyPlayback = async ({
+    action,
+    track_id,
+    playlist_id,
+    artist_id,
+    num_skips,
+  }: {
+    action: "get" | "start" | "pause" | "skip";
+    track_id?: string;
+    playlist_id?: string;
+    artist_id?: string;
+    num_skips?: number;
+  }) => {
+    try {
+      const result = await mcpClient.callSpotifyTool("SpotifyPlayback", {
+        action,
+        track_id,
+        playlist_id,
+        artist_id,
+        num_skips: num_skips || 1,
+      });
+
+      const actionMessages = {
+        get: "Got playback information",
+        start: track_id
+          ? "Started playing track"
+          : playlist_id
+          ? "Started playing playlist"
+          : artist_id
+          ? "Started playing artist"
+          : "Resumed playback",
+        pause: "Paused playback",
+        skip: `Skipped ${num_skips || 1} track(s)`,
+      };
+
+      const successMessage = actionMessages[action];
+      toast.success("Spotify Playback 🎵", { description: successMessage });
+
+      return {
+        success: true,
+        result,
+        message: successMessage,
+      };
+    } catch (error) {
+      console.error("Failed to control Spotify playback:", error);
+      toast.error("Spotify Playback Error ❌", {
+        description: `Failed to control playback: ${error}`,
+      });
+      return {
+        success: false,
+        message: `Failed to control playback: ${error}`,
+      };
+    }
+  };
+
+  const spotifySearch = async ({
+    query,
+    qtype = "track",
+  }: {
+    query: string;
+    qtype?: "track" | "album" | "artist" | "playlist";
+  }) => {
+    try {
+      const result = await mcpClient.callSpotifyTool("SpotifySearch", {
+        query,
+        qtype,
+      });
+
+      toast.success("Spotify Search 🔍", {
+        description: `Found ${result.items?.length || 0} results`,
+      });
+
+      return {
+        success: true,
+        result,
+        message: `Search completed with ${result.items?.length || 0} results`,
+      };
+    } catch (error) {
+      console.error("Failed to search Spotify:", error);
+      toast.error("Spotify Search Error ❌", {
+        description: `Failed to search: ${error}`,
+      });
+      return { success: false, message: `Failed to search: ${error}` };
+    }
+  };
+
+  const spotifyQueue = async ({
+    action,
+    track_id,
+  }: {
+    action: "add" | "get";
+    track_id?: string;
+  }) => {
+    try {
+      const result = await mcpClient.callSpotifyTool("SpotifyQueue", {
+        action,
+        track_id,
+      });
+
+      const successMessage =
+        action === "add" ? "Added track to queue" : "Got queue information";
+      toast.success("Spotify Queue 🎵", { description: successMessage });
+
+      return {
+        success: true,
+        result,
+        message: successMessage,
+      };
+    } catch (error) {
+      console.error("Failed to manage Spotify queue:", error);
+      toast.error("Spotify Queue Error ❌", {
+        description: `Failed to manage queue: ${error}`,
+      });
+      return { success: false, message: `Failed to manage queue: ${error}` };
+    }
+  };
+
+  const spotifyGetInfo = async ({
+    item_id,
+    qtype = "track",
+  }: {
+    item_id: string;
+    qtype?: "track" | "album" | "artist" | "playlist";
+  }) => {
+    try {
+      const result = await mcpClient.callSpotifyTool("SpotifyGetInfo", {
+        item_id,
+        qtype,
+      });
+
+      toast.success("Spotify Info 🎵", {
+        description: `Got ${qtype} information`,
+      });
+
+      return {
+        success: true,
+        result,
+        message: `Retrieved ${qtype} information successfully`,
+      };
+    } catch (error) {
+      console.error("Failed to get Spotify item info:", error);
+      toast.error("Spotify Info Error ❌", {
+        description: `Failed to get info: ${error}`,
+      });
+      return { success: false, message: `Failed to get info: ${error}` };
+    }
+  };
+
+  const spotifyUserPlaylists = async ({
+    limit = 20,
+    offset = 0,
+  }: {
+    limit?: number;
+    offset?: number;
+  }) => {
+    try {
+      const result = await mcpClient.callSpotifyTool("SpotifyUserPlaylists", {
+        limit,
+        offset,
+      });
+
+      toast.success("Spotify Playlists 📑", {
+        description: `Retrieved ${result.items?.length || 0} playlists`,
+      });
+
+      return {
+        success: true,
+        result,
+        message: `Retrieved ${
+          result.items?.length || 0
+        } playlists successfully`,
+      };
+    } catch (error) {
+      console.error("Failed to get user playlists:", error);
+      toast.error("Spotify Playlists Error ❌", {
+        description: `Failed to get playlists: ${error}`,
+      });
+      return { success: false, message: `Failed to get playlists: ${error}` };
+    }
+  };
+
   return {
     timeFunction,
     launchWebsite,
     pasteText,
-    openSpotify,
-    controlMusic,
-    adjustVolume,
     scrapeWebsite,
     stopSession,
     adjustSystemVolume,
+    // spotifyPlayback,
+    // spotifySearch,
+    // spotifyQueue,
+    // spotifyGetInfo,
+    // spotifyUserPlaylists,
   };
+};
+
+interface MCPTool {
+  name: string;
+  description: string;
+  inputSchema?: {
+    properties?: Record<string, any>;
+  };
+}
+
+interface MCPToolsResponse {
+  success: boolean;
+  tools?: MCPTool[];
+  error?: string;
+}
+
+export const useMCPFunctions = () => {
+  const [wrappedFunctions, setWrappedFunctions] = useState<
+    Record<string, Function>
+  >({});
+  const [toolDefinitions, setToolDefinitions] = useState<Tool[]>([]);
+
+  useEffect(() => {
+    const loadTools = async () => {
+      try {
+        const response = (await mcpClient.getTools()) as MCPToolsResponse;
+        const toolsArray = response.tools || [];
+        const newWrappedFunctions: Record<string, Function> = {};
+        const newToolDefinitions: Tool[] = [];
+
+        toolsArray.forEach((tool: MCPTool) => {
+          const toolName: string = tool.name;
+
+          // Create the tool definition matching the Tool interface
+          const toolDefinition: Tool = {
+            type: "function",
+            name: toolName,
+            description: tool.description,
+            parameters: {
+              type: "object",
+              properties: tool.inputSchema?.properties || {},
+            },
+          };
+
+          newToolDefinitions.push(toolDefinition);
+
+          // Create a generic wrapped function for the tool
+          newWrappedFunctions[toolName] = async (input: any) => {
+            try {
+              const result = await mcpClient.callSpotifyTool(toolName, input);
+              toast.success(`${toolName} executed successfully`, {
+                description: `Executed ${toolName} with input: ${JSON.stringify(
+                  input
+                )}`,
+              });
+              return {
+                success: true,
+                result,
+                message: `${toolName} executed successfully`,
+              };
+            } catch (error) {
+              const errorMessage =
+                error instanceof Error ? error.message : String(error);
+              toast.error(`${toolName} execution failed`, {
+                description: errorMessage,
+              });
+              return { success: false, message: errorMessage };
+            }
+          };
+        });
+
+        setWrappedFunctions(newWrappedFunctions);
+        setToolDefinitions(newToolDefinitions);
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        console.error("Failed to load MCP tools:", errorMessage);
+      }
+    };
+
+    loadTools();
+  }, []);
+
+  return { wrappedFunctions, toolDefinitions };
 };

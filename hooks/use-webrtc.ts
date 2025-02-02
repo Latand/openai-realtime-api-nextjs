@@ -5,10 +5,20 @@ import { v4 as uuidv4 } from "uuid";
 import { Conversation } from "@/lib/conversations";
 import { useTranslations } from "@/components/translations-context";
 
+declare global {
+  interface Window {
+    webkitAudioContext: typeof AudioContext;
+  }
+}
+
 export interface Tool {
+  type: "function";
   name: string;
   description: string;
-  parameters?: Record<string, any>;
+  parameters: {
+    type: "object";
+    properties: Record<string, any>;
+  };
 }
 
 /**
@@ -28,18 +38,100 @@ interface UseWebRTCAudioSessionReturn {
   conversation: Conversation[];
   sendTextMessage: (text: string) => void;
 }
+/**
+ * Normalizes the parameters schema:
+ * 1. If the parameters object is nested (i.e. it has exactly one key in "properties"
+ *    whose value is an object with its own "properties"), then that extra level is removed.
+ * 2. For each property, if an "anyOf" clause is present, simplify it by filtering out "null" types
+ *    and merging additional keys.
+ */
+function simplifySchema(schema: any): any {
+  if (schema.anyOf && Array.isArray(schema.anyOf)) {
+    const nonNullSchemas = schema.anyOf.filter((s: any) => s.type !== "null");
+    if (nonNullSchemas.length > 0) {
+      const { anyOf, ...rest } = schema;
+      return { ...rest, ...nonNullSchemas[0] };
+    }
+  }
+  return schema;
+}
+
+/**
+ * Normalizes the parameters schema:
+ * 1. If parameters.properties has exactly one key and that key’s value is an object
+ *    with its own "properties", then flatten that level.
+ * 2. For each property, if an "anyOf" clause is present, simplify it by removing null types.
+ */
+function normalizeParameters(params: any): {
+  type: "object";
+  properties: Record<string, any>;
+} {
+  if (!params || params.type !== "object" || !params.properties) {
+    return { type: "object", properties: {} };
+  }
+
+  let properties = params.properties;
+  const keys = Object.keys(properties);
+
+  // Flatten an extra level if there's exactly one key whose value is an object with its own properties.
+  if (
+    keys.length === 1 &&
+    properties[keys[0]] &&
+    properties[keys[0]].type === "object" &&
+    properties[keys[0]].properties
+  ) {
+    properties = properties[keys[0]].properties;
+  }
+
+  const simplified: Record<string, any> = {};
+  for (const key in properties) {
+    if (properties.hasOwnProperty(key)) {
+      const prop = properties[key];
+      simplified[key] =
+        prop.anyOf && Array.isArray(prop.anyOf) ? simplifySchema(prop) : prop;
+    }
+  }
+  return { type: "object", properties: simplified };
+}
 
 /**
  * Hook to manage a real-time session with OpenAI's Realtime endpoints.
  */
 export default function useWebRTCAudioSession(
   voice: string,
-  tools?: Tool[]
+  toolDefinitions?: Tool[],
+  mcpDefinitions?: Tool[]
 ): UseWebRTCAudioSessionReturn {
   const { t, locale } = useTranslations();
   // Connection/session states
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState("Waiting for MCP definitions...");
   const [isSessionActive, setIsSessionActive] = useState(false);
+
+  // Initialize tools array with provided tools or empty array, ensuring both arrays exist
+  const [allTools, setAllTools] = useState<Tool[]>([]);
+
+  useEffect(() => {
+    const combinedTools: Tool[] = [];
+
+    if (toolDefinitions?.length) {
+      combinedTools.push(...toolDefinitions);
+    }
+
+    if (mcpDefinitions?.length) {
+      const formattedMcpTools = mcpDefinitions.map((tool) => ({
+        type: "function" as const,
+        name: tool.name,
+        description: tool.description,
+        parameters: normalizeParameters(tool.parameters),
+      }));
+      combinedTools.push(...formattedMcpTools);
+    }
+
+    if (combinedTools.length > 0) {
+      console.log("Setting combined tools:", JSON.stringify(combinedTools));
+      setAllTools(combinedTools);
+    }
+  }, [toolDefinitions, mcpDefinitions]);
 
   // Audio references for local mic
   const audioIndicatorRef = useRef<HTMLDivElement | null>(null);
@@ -86,12 +178,13 @@ export default function useWebRTCAudioSession(
    */
   const sessionUpdateSentRef = useRef<boolean>(false);
   const configureDataChannel = (dataChannel: RTCDataChannel) => {
+    console.log("allTools SENDING", JSON.stringify(allTools));
     if (!sessionUpdateSentRef.current) {
       const sessionUpdate = {
         type: "session.update",
         session: {
           modalities: ["text", "audio"],
-          tools: tools || [],
+          tools: allTools,
           input_audio_transcription: {
             model: "whisper-1",
           },
@@ -133,9 +226,7 @@ export default function useWebRTCAudioSession(
     const ephemeralId = ephemeralUserMessageIdRef.current;
     if (!ephemeralId) return;
     setConversation((prev) =>
-      prev.map((msg) =>
-        msg.id === ephemeralId ? { ...msg, ...partial } : msg
-      )
+      prev.map((msg) => (msg.id === ephemeralId ? { ...msg, ...partial } : msg))
     );
   }
 
@@ -152,10 +243,7 @@ export default function useWebRTCAudioSession(
   async function handleDataChannelMessage(event: MessageEvent) {
     try {
       const msg = JSON.parse(event.data);
-      if (
-        dataChannelRef.current?.readyState === "closed" &&
-        isSessionActive
-      ) {
+      if (dataChannelRef.current?.readyState === "closed" && isSessionActive) {
         console.log(
           "Data channel closed unexpectedly, attempting to reconnect..."
         );
@@ -349,7 +437,8 @@ export default function useWebRTCAudioSession(
       audioEl.autoplay = true;
       pc.ontrack = (event) => {
         audioEl.srcObject = event.streams[0];
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const audioCtx = new (window.AudioContext ||
+          window.webkitAudioContext)();
         const src = audioCtx.createMediaStreamSource(event.streams[0]);
         const inboundAnalyzer = audioCtx.createAnalyser();
         inboundAnalyzer.fftSize = 256;

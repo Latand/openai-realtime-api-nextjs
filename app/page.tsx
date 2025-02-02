@@ -1,8 +1,8 @@
 "use client";
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useWakeWord } from "@/hooks/use-wake-word";
-import useWebRTCAudioSession from "@/hooks/use-webrtc";
-import { useToolsFunctions } from "@/hooks/use-tools";
+import useWebRTCAudioSession, { Tool } from "@/hooks/use-webrtc";
+import { useMCPFunctions, useToolsFunctions } from "@/hooks/use-tools";
 import {
   TranslationsProvider,
   useTranslations,
@@ -12,7 +12,6 @@ import { StatusDisplay } from "@/components/status";
 import { tools } from "@/lib/tools";
 import { VoiceSelector } from "@/components/voice-select";
 import { playSound } from "@/lib/tools";
-
 // Constants
 const REINIT_DELAY = 1000;
 const INIT_SOUND_DELAY = 500;
@@ -53,47 +52,57 @@ export default function Page() {
 function useToolRegistration(
   registerFunction: (name: string, func: Function) => void,
   toolsFunctions: Record<string, Function>,
+  mcpTools: Record<string, Function>,
   stopSessionHandler: () => void
 ) {
   useEffect(() => {
+    // First, create a mapping of internal function names to API function names
     const functionNames: Record<string, string> = {
       timeFunction: "getCurrentTime",
       launchWebsite: "launchWebsite",
       copyToClipboard: "copyToClipboard",
       scrapeWebsite: "scrapeWebsite",
       pasteText: "pasteText",
-      openSpotify: "openSpotify",
-      controlMusic: "controlMusic",
-      adjustVolume: "adjustVolume",
       adjustSystemVolume: "adjustSystemVolume",
       stopSession: "stopSession",
+      launchApp: "launchApp",
+      openTerminal: "openTerminal",
+      openFiles: "openFiles",
     };
 
+    // Register regular tools
     Object.entries(toolsFunctions).forEach(([name, func]) => {
-      debug(
-        "Registering tool function:",
-        functionNames[name],
-        "for key:",
-        name
-      );
+      const apiName = functionNames[name];
+      if (apiName) {
+        debug("Registering tool function:", apiName, "for key:", name);
 
-      if (name === "stopSession") {
-        registerFunction(functionNames[name], async (...args: unknown[]) => {
-          const result = await (
-            func as (...args: unknown[]) => Promise<{ success: boolean }>
-          )(...args);
-          if (result.success) {
-            console.log("🛑 Manually stopping voice session");
-            stopSessionHandler();
+        if (name === "stopSession") {
+          registerFunction(apiName, async (...args: unknown[]) => {
+            const result = await (
+              func as (...args: unknown[]) => Promise<{ success: boolean }>
+            )(...args);
+            if (result.success) {
+              console.log("🛑 Manually stopping voice session");
+              stopSessionHandler();
+              return result;
+            }
             return result;
-          }
-          return result;
-        });
-      } else {
-        registerFunction(functionNames[name], func);
+          });
+        } else {
+          registerFunction(apiName, func);
+        }
       }
     });
-  }, [registerFunction, toolsFunctions]);
+
+    // Register MCP tools
+    if (mcpTools && Object.keys(mcpTools).length > 0) {
+      debug("Registering MCP tools:", Object.keys(mcpTools));
+      Object.entries(mcpTools).forEach(([name, func]) => {
+        debug("Registering MCP function:", name);
+        registerFunction(name, func);
+      });
+    }
+  }, [registerFunction, toolsFunctions, stopSessionHandler, mcpTools]);
 }
 
 function useWakeWordConfig(handleWakeWord: () => void): WakeWordConfig {
@@ -145,21 +154,35 @@ function AppContent() {
   const [manualStop, setManualStop] = useState(false);
   const [autoWakeWordEnabled, setAutoWakeWordEnabled] = useState(true);
   const [justReinitialized, setJustReinitialized] = useState(false);
+  const [mcpDefinitions, setMcpDefinitions] = useState<Tool[]>([]);
 
   debug("AppContent initialized with voice:", voice);
 
-  // Initialize WebRTC session
+  const toolsFunctions = useToolsFunctions();
+  const {
+    wrappedFunctions: mcpFunctions,
+    toolDefinitions: mcpToolDefinitions,
+  } = useMCPFunctions();
+
+  // Initialize WebRTC session with all tools
   const {
     status,
     isSessionActive,
     startSession,
     handleStartStopClick,
     registerFunction,
-  } = useWebRTCAudioSession(voice, tools);
+  } = useWebRTCAudioSession(voice, tools, mcpDefinitions);
 
   const prevSessionActiveRef = useRef(isSessionActive);
-  const toolsFunctions = useToolsFunctions();
   const stopWakeWordRef = useRef<() => Promise<void>>(() => Promise.resolve());
+
+  // Update MCP definitions when they're available
+  useEffect(() => {
+    if (Object.keys(mcpFunctions).length > 0) {
+      debug("MCP tools registered:", Object.keys(mcpFunctions));
+      setMcpDefinitions(mcpToolDefinitions as Tool[]);
+    }
+  }, [mcpFunctions, mcpToolDefinitions]);
 
   // Handle wake word detection
   const handleWakeWord = useCallback(() => {
@@ -279,12 +302,16 @@ function AppContent() {
     startSession,
   ]);
   // Register tool functions
-  useToolRegistration(registerFunction, toolsFunctions, onButtonClick);
+  useToolRegistration(
+    registerFunction,
+    toolsFunctions,
+    mcpFunctions,
+    onButtonClick
+  );
   useEffect(() => {
     startWakeWord();
     return () => {};
   }, [startWakeWord]);
-
   // Handle sound effects
   useSoundEffects(isSessionActive, justReinitialized);
 

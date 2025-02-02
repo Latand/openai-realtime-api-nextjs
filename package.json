@@ -20,6 +20,7 @@
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
     "@mendable/firecrawl-js": "^1.12.0",
+    "@modelcontextprotocol/sdk": "^1.4.1",
     "@picovoice/porcupine-react": "^3.0.3",
     "@picovoice/porcupine-web": "^3.0.3",
     "@picovoice/web-voice-processor": "^4.0.9",
