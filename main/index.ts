@@ -4,6 +4,7 @@ import {
   ipcMain,
   clipboard,
   globalShortcut,
+  screen,
 } from "electron";
 import * as path from "path";
 import { format } from "url";
@@ -17,9 +18,14 @@ const isDevelopment = process.env.NODE_ENV !== "production";
 let mainWindow: BrowserWindow | null = null;
 
 function createMainWindow(): BrowserWindow {
+  const { width: screenWidth, height: screenHeight } =
+    screen.getPrimaryDisplay().workAreaSize;
+  const windowWidth = 400;
+  const windowHeight = 400;
+
   const window = new BrowserWindow({
-    width: 400,
-    height: 400,
+    width: windowWidth,
+    height: windowHeight,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -28,8 +34,12 @@ function createMainWindow(): BrowserWindow {
     autoHideMenuBar: true,
     frame: true,
     alwaysOnTop: true,
-    x: 1000,
+    x: screenWidth - windowWidth * 3, // Touch the right edge
+    y: Math.floor((screenHeight - windowHeight) / 2), // Center vertically
   });
+
+  // Make window visible on all workspaces
+  window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
   if (isDevelopment) {
     setTimeout(() => {

@@ -43,9 +43,12 @@ const execAsync = (0, util_1.promisify)(child_process_1.exec);
 const isDevelopment = process.env.NODE_ENV !== "production";
 let mainWindow = null;
 function createMainWindow() {
+    const { width: screenWidth, height: screenHeight } = electron_1.screen.getPrimaryDisplay().workAreaSize;
+    const windowWidth = 400;
+    const windowHeight = 400;
     const window = new electron_1.BrowserWindow({
-        width: 400,
-        height: 400,
+        width: windowWidth,
+        height: windowHeight,
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
@@ -54,8 +57,11 @@ function createMainWindow() {
         autoHideMenuBar: true,
         frame: true,
         alwaysOnTop: true,
-        x: 1000,
+        x: screenWidth - windowWidth * 3, // Touch the right edge
+        y: Math.floor((screenHeight - windowHeight) / 2), // Center vertically
     });
+    // Make window visible on all workspaces
+    window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     if (isDevelopment) {
         setTimeout(() => {
             window.loadURL("http://localhost:3000");
