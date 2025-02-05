@@ -58,7 +58,7 @@ function simplifySchema(schema: any): any {
 
 /**
  * Normalizes the parameters schema:
- * 1. If parameters.properties has exactly one key and that key’s value is an object
+ * 1. If parameters.properties has exactly one key and that key's value is an object
  *    with its own "properties", then flatten that level.
  * 2. For each property, if an "anyOf" clause is present, simplify it by removing null types.
  */
@@ -333,9 +333,23 @@ export default function useWebRTCAudioSession(
               },
             };
             dataChannelRef.current?.send(JSON.stringify(response));
-            const responseCreate = { type: "response.create" };
-            dataChannelRef.current?.send(JSON.stringify(responseCreate));
+          } else {
+            // Send error response when function is not found
+            const errorResponse = {
+              type: "conversation.item.create",
+              item: {
+                type: "function_call_output",
+                call_id: msg.call_id,
+                output: JSON.stringify({
+                  error: `Function '${msg.name}' not found in registry`,
+                }),
+              },
+            };
+            dataChannelRef.current?.send(JSON.stringify(errorResponse));
           }
+          // Always create a new response after function call
+          const responseCreate = { type: "response.create" };
+          dataChannelRef.current?.send(JSON.stringify(responseCreate));
           break;
         }
         default: {
