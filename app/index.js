@@ -44,8 +44,8 @@ const isDevelopment = process.env.NODE_ENV !== "production";
 let mainWindow = null;
 function createMainWindow() {
     const window = new electron_1.BrowserWindow({
-        width: 1600,
-        height: 600,
+        width: 400,
+        height: 400,
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
@@ -53,11 +53,13 @@ function createMainWindow() {
         },
         autoHideMenuBar: true,
         frame: true,
+        alwaysOnTop: true,
+        x: 1000,
     });
     if (isDevelopment) {
         setTimeout(() => {
             window.loadURL("http://localhost:3000");
-            window.webContents.openDevTools();
+            // window.webContents.openDevTools();
         }, 1000);
     }
     else {
@@ -89,6 +91,10 @@ electron_1.app.on("ready", async () => {
     // Initialize MCP service
     await mcp_service_1.mcpService.initialize();
     mcp_service_1.mcpService.setupIPC();
+    // Add IPC handler for dev tools
+    electron_1.ipcMain.handle("window:toggleDevTools", () => {
+        mainWindow?.webContents.toggleDevTools();
+    });
 });
 electron_1.app.on("will-quit", async () => {
     // Cleanup MCP service
@@ -179,7 +185,6 @@ async function typeText(text) {
 electron_1.ipcMain.handle("clipboard:writeAndPaste", async (_, text) => {
     try {
         await electron_1.clipboard.writeText(text);
-        await typeText(text);
         return { success: true };
     }
     catch (error) {
@@ -187,20 +192,6 @@ electron_1.ipcMain.handle("clipboard:writeAndPaste", async (_, text) => {
             success: false,
             error: error instanceof Error ? error.message : String(error),
         };
-    }
-});
-electron_1.ipcMain.handle("clipboard:writeAndEnter", async (_, text) => {
-    try {
-        await electron_1.clipboard.writeText(text);
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        await simulatePaste();
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        await simulateKeyPress("Return");
-        return { success: true };
-    }
-    catch (error) {
-        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
-        return { success: false, error: errorMessage };
     }
 });
 electron_1.ipcMain.handle("clipboard:read", async () => {
@@ -229,23 +220,6 @@ async function execWithLogging(command, context) {
         throw error;
     }
 }
-// Handle system operations for music control
-electron_1.ipcMain.handle("system:test", () => {
-    return new Promise((resolve) => {
-        (0, child_process_1.exec)('echo "Test from Electron"', (error, stdout, stderr) => {
-            if (error) {
-                console.error(`Error: ${error.message}`);
-                resolve({ success: false, error: error.message });
-                return;
-            }
-            if (stderr) {
-                console.error(`Stderr: ${stderr}`);
-            }
-            console.log(`Output: ${stdout}`);
-            resolve({ success: true, output: stdout });
-        });
-    });
-});
 electron_1.ipcMain.handle("system:openSpotify", () => {
     return new Promise((resolve) => {
         // Use spawn with shell option to handle the command better

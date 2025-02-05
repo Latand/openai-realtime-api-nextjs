@@ -3,6 +3,7 @@ import { Geist } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { Toaster } from "@/components/ui/sonner";
+import { DevToolsButton } from "@/components/dev-tools-button";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -28,9 +29,10 @@ export default function RootLayout({
         )}
       >
         <div className="relative flex min-h-dvh flex-col bg-black items-center">
-          <main className="flex flex-1 justify-center items-center w-full">
+          <main className="mt-8 flex flex-1 justify-center items-start w-full">
             {children}
           </main>
+          <DevToolsButton />
         </div>
         <Toaster theme="dark" />
       </body>

@@ -12,6 +12,9 @@ contextBridge.exposeInMainWorld("electron", {
     adjustSystemVolume: (percentage: number) =>
       ipcRenderer.invoke("system:adjustSystemVolume", percentage),
   },
+  window: {
+    toggleDevTools: () => ipcRenderer.invoke("window:toggleDevTools"),
+  },
   mcp: {
     spotify: async (action: string, params = {}) => {
       return await ipcRenderer.invoke("mcp:spotify", { action, params });

@@ -21,6 +21,9 @@ declare global {
           percentage: number
         ) => Promise<{ success: boolean; error?: string }>;
       };
+      window: {
+        toggleDevTools: () => Promise<void>;
+      };
       mcp: {
         spotify: (
           action: string,

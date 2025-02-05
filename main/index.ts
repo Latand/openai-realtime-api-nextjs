@@ -18,8 +18,8 @@ let mainWindow: BrowserWindow | null = null;
 
 function createMainWindow(): BrowserWindow {
   const window = new BrowserWindow({
-    width: 1600,
-    height: 600,
+    width: 400,
+    height: 400,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -27,12 +27,14 @@ function createMainWindow(): BrowserWindow {
     },
     autoHideMenuBar: true,
     frame: true,
+    alwaysOnTop: true,
+    x: 1000,
   });
 
   if (isDevelopment) {
     setTimeout(() => {
       window.loadURL("http://localhost:3000");
-      window.webContents.openDevTools();
+      // window.webContents.openDevTools();
     }, 1000);
   } else {
     window.loadURL(
@@ -71,6 +73,11 @@ app.on("ready", async () => {
   // Initialize MCP service
   await mcpService.initialize();
   mcpService.setupIPC();
+
+  // Add IPC handler for dev tools
+  ipcMain.handle("window:toggleDevTools", () => {
+    mainWindow?.webContents.toggleDevTools();
+  });
 });
 
 app.on("will-quit", async () => {
@@ -167,28 +174,12 @@ async function typeText(text: string): Promise<void> {
 ipcMain.handle("clipboard:writeAndPaste", async (_, text: string) => {
   try {
     await clipboard.writeText(text);
-    await typeText(text);
     return { success: true };
   } catch (error) {
     return {
       success: false,
       error: error instanceof Error ? error.message : String(error),
     };
-  }
-});
-
-ipcMain.handle("clipboard:writeAndEnter", async (_, text: string) => {
-  try {
-    await clipboard.writeText(text);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await simulatePaste();
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await simulateKeyPress("Return");
-    return { success: true };
-  } catch (error) {
-    const errorMessage =
-      error instanceof Error ? error.message : "Unknown error occurred";
-    return { success: false, error: errorMessage };
   }
 });
 
@@ -216,24 +207,6 @@ async function execWithLogging(command: string, context: string) {
     throw error;
   }
 }
-
-// Handle system operations for music control
-ipcMain.handle("system:test", () => {
-  return new Promise((resolve) => {
-    exec('echo "Test from Electron"', (error, stdout, stderr) => {
-      if (error) {
-        console.error(`Error: ${error.message}`);
-        resolve({ success: false, error: error.message });
-        return;
-      }
-      if (stderr) {
-        console.error(`Stderr: ${stderr}`);
-      }
-      console.log(`Output: ${stdout}`);
-      resolve({ success: true, output: stdout });
-    });
-  });
-});
 
 ipcMain.handle("system:openSpotify", () => {
   return new Promise((resolve) => {

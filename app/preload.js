@@ -10,6 +10,9 @@ electron_1.contextBridge.exposeInMainWorld("electron", {
     system: {
         adjustSystemVolume: (percentage) => electron_1.ipcRenderer.invoke("system:adjustSystemVolume", percentage),
     },
+    window: {
+        toggleDevTools: () => electron_1.ipcRenderer.invoke("window:toggleDevTools"),
+    },
     mcp: {
         spotify: async (action, params = {}) => {
             return await electron_1.ipcRenderer.invoke("mcp:spotify", { action, params });

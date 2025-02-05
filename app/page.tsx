@@ -118,7 +118,7 @@ function useWakeWordConfig(handleWakeWord: () => void): WakeWordConfig {
       {
         label: "Hi Jarvis",
         publicPath: "/models/Hi-Jarvis.ppn",
-        sensitivity: 0.9,
+        sensitivity: 0.6,
         customWritePath: "Hi-Jarvis.ppn",
         forceWrite: true,
       },
@@ -316,10 +316,10 @@ function AppContent() {
   useSoundEffects(isSessionActive, justReinitialized);
 
   return (
-    <main className="h-full flex flex-col items-center justify-center p-4">
-      <div className="mb-4">
-        <VoiceSelector value={voice} onValueChange={setVoice} />
-      </div>
+    <main className="h-full flex flex-col justify-center p-4">
+      {/* <div className="mb-4"> */}
+      {/* <VoiceSelector value={voice} onValueChange={setVoice} /> */}
+      {/* </div> */}
       <div className="flex flex-col items-center gap-4">
         <StatusDisplay status={status} />
         <BroadcastButton
