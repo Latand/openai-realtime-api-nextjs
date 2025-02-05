@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "main": "app/index.js",
+  "author": {
+    "name": "latand",
+    "email": "latand666@gmail.com"
+  },
+  "description": "OpenAI Realtime API with WebRTC voice chat",
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
@@ -15,6 +20,10 @@
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
     "@mendable/firecrawl-js": "^1.12.0",
+    "@modelcontextprotocol/sdk": "^1.4.1",
+    "@picovoice/porcupine-react": "^3.0.3",
+    "@picovoice/porcupine-web": "^3.0.3",
+    "@picovoice/web-voice-processor": "^4.0.9",
     "@radix-ui/react-accordion": "^1.2.2",
     "@radix-ui/react-alert-dialog": "^1.1.4",
     "@radix-ui/react-aspect-ratio": "^1.1.1",

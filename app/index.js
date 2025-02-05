@@ -38,13 +38,17 @@ const path = __importStar(require("path"));
 const url_1 = require("url");
 const child_process_1 = require("child_process");
 const util_1 = require("util");
+const mcp_service_1 = require("./mcp-service");
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
 const isDevelopment = process.env.NODE_ENV !== "production";
-let mainWindow;
+let mainWindow = null;
 function createMainWindow() {
+    const { width: screenWidth, height: screenHeight } = electron_1.screen.getPrimaryDisplay().workAreaSize;
+    const windowWidth = 400;
+    const windowHeight = 400;
     const window = new electron_1.BrowserWindow({
-        width: 800,
-        height: 600,
+        width: windowWidth,
+        height: windowHeight,
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
@@ -52,10 +56,16 @@ function createMainWindow() {
         },
         autoHideMenuBar: true,
         frame: true,
+        alwaysOnTop: true,
+        x: screenWidth - windowWidth * 3, // Touch the right edge
+        y: Math.floor((screenHeight - windowHeight) / 2), // Center vertically
     });
+    // Make window visible on all workspaces
+    window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     if (isDevelopment) {
         setTimeout(() => {
             window.loadURL("http://localhost:3000");
+            // window.webContents.openDevTools();
         }, 1000);
     }
     else {
@@ -82,8 +92,19 @@ electron_1.app.on("activate", () => {
     }
 });
 // Create main BrowserWindow when electron is ready
-electron_1.app.on("ready", () => {
+electron_1.app.on("ready", async () => {
     mainWindow = createMainWindow();
+    // Initialize MCP service
+    await mcp_service_1.mcpService.initialize();
+    mcp_service_1.mcpService.setupIPC();
+    // Add IPC handler for dev tools
+    electron_1.ipcMain.handle("window:toggleDevTools", () => {
+        mainWindow?.webContents.toggleDevTools();
+    });
+});
+electron_1.app.on("will-quit", async () => {
+    // Cleanup MCP service
+    await mcp_service_1.mcpService.disconnect();
 });
 // Function to simulate keyboard actions
 async function simulateKeyPress(key) {
@@ -101,7 +122,6 @@ async function simulateKeyPress(key) {
 async function simulatePaste() {
     if (process.platform === "linux") {
         try {
-            // Increase delay to 500ms to ensure window focus
             await new Promise((resolve) => setTimeout(resolve, 500));
             await execAsync("xdotool key ctrl+v");
         }
@@ -132,31 +152,52 @@ electron_1.ipcMain.handle("clipboard:write", async (_, text) => {
         return { success: false, error: errorMessage };
     }
 });
-electron_1.ipcMain.handle("clipboard:writeAndPaste", async (_, text) => {
+async function adjustSystemVolume(percentage) {
     try {
-        electron_1.clipboard.writeText(text);
-        // Wait a bit to ensure the text is in clipboard
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        await simulatePaste();
+        console.log(`[SystemVolume] Setting volume to ${percentage}%`);
+        const command = `wpctl set-volume @DEFAULT_AUDIO_SINK@ ${percentage}%`;
+        await execAsync(command);
         return { success: true };
     }
     catch (error) {
-        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
-        return { success: false, error: errorMessage };
+        console.error("[SystemVolume] Failed to adjust volume:", error);
+        throw error;
+    }
+}
+// System controls
+electron_1.ipcMain.handle("system:adjustSystemVolume", async (_, percentage) => {
+    try {
+        const result = await adjustSystemVolume(percentage);
+        return result;
+    }
+    catch (error) {
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+        };
     }
 });
-electron_1.ipcMain.handle("clipboard:writeAndEnter", async (_, text) => {
+// Function to type text using xdotool
+async function typeText(text) {
     try {
-        electron_1.clipboard.writeText(text);
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        await simulatePaste();
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        await simulateKeyPress("Return");
+        await execAsync(`xdotool type "${text}"`);
+    }
+    catch (error) {
+        console.error("Failed to type text:", error);
+        throw error;
+    }
+}
+// Clipboard controls
+electron_1.ipcMain.handle("clipboard:writeAndPaste", async (_, text) => {
+    try {
+        await electron_1.clipboard.writeText(text);
         return { success: true };
     }
     catch (error) {
-        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
-        return { success: false, error: errorMessage };
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+        };
     }
 });
 electron_1.ipcMain.handle("clipboard:read", async () => {
@@ -185,97 +226,6 @@ async function execWithLogging(command, context) {
         throw error;
     }
 }
-// Add helper function to try different Spotify launch methods
-async function tryLaunchSpotify(context) {
-    console.log(`[${context}] Attempting to launch Spotify using different methods...`);
-    // Try methods in sequence
-    const methods = [
-        {
-            name: "flatpak",
-            cmd: "flatpak run com.spotify.Client",
-            check: async () => {
-                try {
-                    await execWithLogging("flatpak list | grep spotify", context);
-                    return true;
-                }
-                catch {
-                    return false;
-                }
-            },
-        },
-        {
-            name: "snap",
-            cmd: "snap run spotify",
-            check: async () => {
-                try {
-                    await execWithLogging("snap list | grep spotify", context);
-                    return true;
-                }
-                catch {
-                    return false;
-                }
-            },
-        },
-        {
-            name: "native",
-            cmd: "spotify --no-zygote", // Try with --no-zygote to avoid GBM issues
-            check: async () => {
-                try {
-                    await execWithLogging("which spotify", context);
-                    return true;
-                }
-                catch {
-                    return false;
-                }
-            },
-        },
-    ];
-    for (const method of methods) {
-        if (await method.check()) {
-            console.log(`[${context}] Found ${method.name} installation, attempting to launch...`);
-            try {
-                // Use spawn instead of exec for better process handling
-                const process = (0, child_process_1.spawn)(method.cmd.split(" ")[0], method.cmd.split(" ").slice(1), {
-                    detached: true,
-                    stdio: "ignore",
-                });
-                process.unref(); // Detach from parent process
-                // Wait a bit and check if process is running
-                await new Promise((resolve) => setTimeout(resolve, 3000));
-                try {
-                    const { stdout } = await execWithLogging("pidof spotify", context);
-                    console.log(`[${context}] Successfully launched using ${method.name}, PID:`, stdout.trim());
-                    return true;
-                }
-                catch (error) {
-                    console.error(`[${context}] Process check failed after ${method.name} launch:`, error);
-                }
-            }
-            catch (error) {
-                console.error(`[${context}] Failed to launch using ${method.name}:`, error);
-            }
-        }
-    }
-    console.error(`[${context}] All launch methods failed`);
-    return false;
-}
-// Handle system operations for music control
-electron_1.ipcMain.handle("system:test", () => {
-    return new Promise((resolve) => {
-        (0, child_process_1.exec)('echo "Test from Electron"', (error, stdout, stderr) => {
-            if (error) {
-                console.error(`Error: ${error.message}`);
-                resolve({ success: false, error: error.message });
-                return;
-            }
-            if (stderr) {
-                console.error(`Stderr: ${stderr}`);
-            }
-            console.log(`Output: ${stdout}`);
-            resolve({ success: true, output: stdout });
-        });
-    });
-});
 electron_1.ipcMain.handle("system:openSpotify", () => {
     return new Promise((resolve) => {
         // Use spawn with shell option to handle the command better
@@ -311,23 +261,6 @@ electron_1.ipcMain.handle("system:openSpotify", () => {
         }, 1000);
     });
 });
-electron_1.ipcMain.handle("system:controlMusic", (_, action) => {
-    return new Promise((resolve) => {
-        const command = "dbus-send --print-reply --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.PlayPause";
-        (0, child_process_1.exec)(command, (error, stdout, stderr) => {
-            if (error) {
-                console.error(`Error: ${error.message}`);
-                resolve({ success: false, error: error.message });
-                return;
-            }
-            if (stderr) {
-                console.error(`Stderr: ${stderr}`);
-            }
-            console.log(`Output: ${stdout}`);
-            resolve({ success: true });
-        });
-    });
-});
 electron_1.ipcMain.handle("system:adjustVolume", (_, percentage) => {
     return new Promise((resolve) => {
         // Convert percentage to decimal (0-1 range)
@@ -335,25 +268,6 @@ electron_1.ipcMain.handle("system:adjustVolume", (_, percentage) => {
         // Use D-Bus to set Spotify's volume specifically with correct variant syntax
         const command = `dbus-send --print-reply --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.freedesktop.DBus.Properties.Set string:"org.mpris.MediaPlayer2.Player" string:"Volume" variant:double:${volume}`;
         console.log(`[Volume] Executing command: ${command}`);
-        (0, child_process_1.exec)(command, (error, stdout, stderr) => {
-            if (error) {
-                console.error(`Error: ${error.message}`);
-                resolve({ success: false, error: error.message });
-                return;
-            }
-            if (stderr) {
-                console.error(`Stderr: ${stderr}`);
-            }
-            console.log(`Output: ${stdout}`);
-            resolve({ success: true });
-        });
-    });
-});
-electron_1.ipcMain.handle("system:adjustSystemVolume", (_, percentage) => {
-    return new Promise((resolve) => {
-        // Format volume value as a percentage
-        const command = `wpctl set-volume @DEFAULT_AUDIO_SINK@ ${percentage}%`;
-        console.log(`[SystemVolume] Executing command: ${command}`);
         (0, child_process_1.exec)(command, (error, stdout, stderr) => {
             if (error) {
                 console.error(`Error: ${error.message}`);

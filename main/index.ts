@@ -4,21 +4,28 @@ import {
   ipcMain,
   clipboard,
   globalShortcut,
+  screen,
 } from "electron";
 import * as path from "path";
-import { format as formatUrl } from "url";
+import { format } from "url";
 import { exec, spawn } from "child_process";
 import { promisify } from "util";
+import { mcpService } from "./mcp-service";
 
 const execAsync = promisify(exec);
 const isDevelopment = process.env.NODE_ENV !== "production";
 
-let mainWindow: BrowserWindow | null;
+let mainWindow: BrowserWindow | null = null;
 
-function createMainWindow() {
+function createMainWindow(): BrowserWindow {
+  const { width: screenWidth, height: screenHeight } =
+    screen.getPrimaryDisplay().workAreaSize;
+  const windowWidth = 400;
+  const windowHeight = 400;
+
   const window = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: windowWidth,
+    height: windowHeight,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -26,15 +33,22 @@ function createMainWindow() {
     },
     autoHideMenuBar: true,
     frame: true,
+    alwaysOnTop: true,
+    x: screenWidth - windowWidth * 3, // Touch the right edge
+    y: Math.floor((screenHeight - windowHeight) / 2), // Center vertically
   });
+
+  // Make window visible on all workspaces
+  window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
   if (isDevelopment) {
     setTimeout(() => {
       window.loadURL("http://localhost:3000");
+      // window.webContents.openDevTools();
     }, 1000);
   } else {
     window.loadURL(
-      formatUrl({
+      format({
         pathname: path.join(__dirname, "../renderer/out/index.html"),
         protocol: "file",
         slashes: true,
@@ -63,12 +77,26 @@ app.on("activate", () => {
 });
 
 // Create main BrowserWindow when electron is ready
-app.on("ready", () => {
+app.on("ready", async () => {
   mainWindow = createMainWindow();
+
+  // Initialize MCP service
+  await mcpService.initialize();
+  mcpService.setupIPC();
+
+  // Add IPC handler for dev tools
+  ipcMain.handle("window:toggleDevTools", () => {
+    mainWindow?.webContents.toggleDevTools();
+  });
+});
+
+app.on("will-quit", async () => {
+  // Cleanup MCP service
+  await mcpService.disconnect();
 });
 
 // Function to simulate keyboard actions
-async function simulateKeyPress(key: string) {
+async function simulateKeyPress(key: string): Promise<void> {
   if (process.platform === "linux") {
     try {
       await new Promise((resolve) => setTimeout(resolve, 500));
@@ -80,10 +108,9 @@ async function simulateKeyPress(key: string) {
 }
 
 // Function to simulate paste keystroke
-async function simulatePaste() {
+async function simulatePaste(): Promise<void> {
   if (process.platform === "linux") {
     try {
-      // Increase delay to 500ms to ensure window focus
       await new Promise((resolve) => setTimeout(resolve, 500));
       await execAsync("xdotool key ctrl+v");
     } catch (error) {
@@ -97,7 +124,7 @@ ipcMain.handle("keyboard:pressEnter", async () => {
   try {
     await simulateKeyPress("Return");
     return { success: true };
-  } catch (error: unknown) {
+  } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error occurred";
     return { success: false, error: errorMessage };
@@ -109,39 +136,60 @@ ipcMain.handle("clipboard:write", async (_, text: string) => {
   try {
     clipboard.writeText(text);
     return { success: true };
-  } catch (error: unknown) {
+  } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error occurred";
     return { success: false, error: errorMessage };
   }
 });
 
+async function adjustSystemVolume(
+  percentage: number
+): Promise<{ success: boolean }> {
+  try {
+    console.log(`[SystemVolume] Setting volume to ${percentage}%`);
+    const command = `wpctl set-volume @DEFAULT_AUDIO_SINK@ ${percentage}%`;
+    await execAsync(command);
+    return { success: true };
+  } catch (error) {
+    console.error("[SystemVolume] Failed to adjust volume:", error);
+    throw error;
+  }
+}
+
+// System controls
+ipcMain.handle("system:adjustSystemVolume", async (_, percentage: number) => {
+  try {
+    const result = await adjustSystemVolume(percentage);
+    return result;
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+});
+
+// Function to type text using xdotool
+async function typeText(text: string): Promise<void> {
+  try {
+    await execAsync(`xdotool type "${text}"`);
+  } catch (error) {
+    console.error("Failed to type text:", error);
+    throw error;
+  }
+}
+
+// Clipboard controls
 ipcMain.handle("clipboard:writeAndPaste", async (_, text: string) => {
   try {
-    clipboard.writeText(text);
-    // Wait a bit to ensure the text is in clipboard
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await simulatePaste();
+    await clipboard.writeText(text);
     return { success: true };
-  } catch (error: unknown) {
-    const errorMessage =
-      error instanceof Error ? error.message : "Unknown error occurred";
-    return { success: false, error: errorMessage };
-  }
-});
-
-ipcMain.handle("clipboard:writeAndEnter", async (_, text: string) => {
-  try {
-    clipboard.writeText(text);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await simulatePaste();
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await simulateKeyPress("Return");
-    return { success: true };
-  } catch (error: unknown) {
-    const errorMessage =
-      error instanceof Error ? error.message : "Unknown error occurred";
-    return { success: false, error: errorMessage };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 });
 
@@ -149,7 +197,7 @@ ipcMain.handle("clipboard:read", async () => {
   try {
     const text = clipboard.readText();
     return { success: true, text };
-  } catch (error: unknown) {
+  } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error occurred";
     return { success: false, error: errorMessage };
@@ -157,10 +205,7 @@ ipcMain.handle("clipboard:read", async () => {
 });
 
 // Add a helper function for command execution with logging
-async function execWithLogging(
-  command: string,
-  context: string
-): Promise<{ stdout: string; stderr: string }> {
+async function execWithLogging(command: string, context: string) {
   console.log(`[${context}] Executing command: ${command}`);
   try {
     const { stdout, stderr } = await execAsync(command);
@@ -172,116 +217,6 @@ async function execWithLogging(
     throw error;
   }
 }
-
-// Add helper function to try different Spotify launch methods
-async function tryLaunchSpotify(context: string): Promise<boolean> {
-  console.log(
-    `[${context}] Attempting to launch Spotify using different methods...`
-  );
-
-  // Try methods in sequence
-  const methods = [
-    {
-      name: "flatpak",
-      cmd: "flatpak run com.spotify.Client",
-      check: async () => {
-        try {
-          await execWithLogging("flatpak list | grep spotify", context);
-          return true;
-        } catch {
-          return false;
-        }
-      },
-    },
-    {
-      name: "snap",
-      cmd: "snap run spotify",
-      check: async () => {
-        try {
-          await execWithLogging("snap list | grep spotify", context);
-          return true;
-        } catch {
-          return false;
-        }
-      },
-    },
-    {
-      name: "native",
-      cmd: "spotify --no-zygote", // Try with --no-zygote to avoid GBM issues
-      check: async () => {
-        try {
-          await execWithLogging("which spotify", context);
-          return true;
-        } catch {
-          return false;
-        }
-      },
-    },
-  ];
-
-  for (const method of methods) {
-    if (await method.check()) {
-      console.log(
-        `[${context}] Found ${method.name} installation, attempting to launch...`
-      );
-      try {
-        // Use spawn instead of exec for better process handling
-        const process = spawn(
-          method.cmd.split(" ")[0],
-          method.cmd.split(" ").slice(1),
-          {
-            detached: true,
-            stdio: "ignore",
-          }
-        );
-
-        process.unref(); // Detach from parent process
-
-        // Wait a bit and check if process is running
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-        try {
-          const { stdout } = await execWithLogging("pidof spotify", context);
-          console.log(
-            `[${context}] Successfully launched using ${method.name}, PID:`,
-            stdout.trim()
-          );
-          return true;
-        } catch (error) {
-          console.error(
-            `[${context}] Process check failed after ${method.name} launch:`,
-            error
-          );
-        }
-      } catch (error) {
-        console.error(
-          `[${context}] Failed to launch using ${method.name}:`,
-          error
-        );
-      }
-    }
-  }
-
-  console.error(`[${context}] All launch methods failed`);
-  return false;
-}
-
-// Handle system operations for music control
-ipcMain.handle("system:test", () => {
-  return new Promise((resolve) => {
-    exec('echo "Test from Electron"', (error, stdout, stderr) => {
-      if (error) {
-        console.error(`Error: ${error.message}`);
-        resolve({ success: false, error: error.message });
-        return;
-      }
-      if (stderr) {
-        console.error(`Stderr: ${stderr}`);
-      }
-      console.log(`Output: ${stdout}`);
-      resolve({ success: true, output: stdout });
-    });
-  });
-});
 
 ipcMain.handle("system:openSpotify", () => {
   return new Promise((resolve) => {
@@ -321,25 +256,6 @@ ipcMain.handle("system:openSpotify", () => {
   });
 });
 
-ipcMain.handle("system:controlMusic", (_, action: "play" | "pause") => {
-  return new Promise((resolve) => {
-    const command =
-      "dbus-send --print-reply --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.PlayPause";
-    exec(command, (error, stdout, stderr) => {
-      if (error) {
-        console.error(`Error: ${error.message}`);
-        resolve({ success: false, error: error.message });
-        return;
-      }
-      if (stderr) {
-        console.error(`Stderr: ${stderr}`);
-      }
-      console.log(`Output: ${stdout}`);
-      resolve({ success: true });
-    });
-  });
-});
-
 ipcMain.handle("system:adjustVolume", (_, percentage: number) => {
   return new Promise((resolve) => {
     // Convert percentage to decimal (0-1 range)
@@ -349,27 +265,6 @@ ipcMain.handle("system:adjustVolume", (_, percentage: number) => {
     const command = `dbus-send --print-reply --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.freedesktop.DBus.Properties.Set string:"org.mpris.MediaPlayer2.Player" string:"Volume" variant:double:${volume}`;
 
     console.log(`[Volume] Executing command: ${command}`);
-    exec(command, (error, stdout, stderr) => {
-      if (error) {
-        console.error(`Error: ${error.message}`);
-        resolve({ success: false, error: error.message });
-        return;
-      }
-      if (stderr) {
-        console.error(`Stderr: ${stderr}`);
-      }
-      console.log(`Output: ${stdout}`);
-      resolve({ success: true });
-    });
-  });
-});
-
-ipcMain.handle("system:adjustSystemVolume", (_, percentage: number) => {
-  return new Promise((resolve) => {
-    // Format volume value as a percentage
-    const command = `wpctl set-volume @DEFAULT_AUDIO_SINK@ ${percentage}%`;
-
-    console.log(`[SystemVolume] Executing command: ${command}`);
     exec(command, (error, stdout, stderr) => {
       if (error) {
         console.error(`Error: ${error.message}`);

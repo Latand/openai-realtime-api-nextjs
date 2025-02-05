@@ -1,26 +1,46 @@
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { useTranslations } from "@/components/translations-context";
 
 interface BroadcastButtonProps {
-  isSessionActive: boolean
-  onClick: () => void
+  isSessionActive: boolean;
+  detected: boolean;
+  onClick: () => void;
 }
 
-export function BroadcastButton({ isSessionActive, onClick }: BroadcastButtonProps) {
-  const { t } = useTranslations();
+export function BroadcastButton({
+  isSessionActive,
+  detected,
+  onClick,
+}: BroadcastButtonProps) {
   return (
     <Button
-      variant={isSessionActive ? "destructive" : "default"}
-      className="w-full py-6 text-lg font-medium flex items-center justify-center gap-2 motion-preset-shake"
+      variant={
+        isSessionActive ? "destructive" : detected ? "secondary" : "default"
+      }
+      className={`w-full py-6 text-lg font-medium flex items-center justify-center gap-2 motion-preset-shake ${
+        detected && !isSessionActive ? "opacity-50 cursor-not-allowed" : ""
+      }`}
       onClick={onClick}
+      disabled={detected && !isSessionActive}
     >
       {isSessionActive && (
-        <Badge variant="secondary" className="animate-pulse bg-red-100 text-red-700">
-          {t('broadcast.live')}
+        <Badge
+          variant="secondary"
+          className="animate-pulse bg-red-100 text-red-700"
+        >
+          LIVE
         </Badge>
       )}
-      {isSessionActive ? t('broadcast.end') : t('broadcast.start')}
+      {detected && !isSessionActive ? (
+        <Badge variant="secondary" className="animate-pulse">
+          Detected
+        </Badge>
+      ) : isSessionActive ? (
+        "Stop"
+      ) : (
+        "Start"
+      )}
     </Button>
-  )
-} 
+  );
+}
