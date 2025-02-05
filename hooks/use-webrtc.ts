@@ -169,7 +169,7 @@ export default function useWebRTCAudioSession(
    * Register a function (tool) so the AI can call it.
    */
   function registerFunction(name: string, fn: Function) {
-    functionRegistry.current[name] = fn;
+    functionRegistry.current[name.toLowerCase()] = fn;
   }
 
   /**
@@ -319,7 +319,8 @@ export default function useWebRTCAudioSession(
           break;
         }
         case "response.function_call_arguments.done": {
-          const fn = functionRegistry.current[msg.name];
+          console.log("response.function_call_arguments.done", msg);
+          const fn = functionRegistry.current[msg.name.toLowerCase()];
           if (fn) {
             const args = JSON.parse(msg.arguments);
             const result = await fn(args);

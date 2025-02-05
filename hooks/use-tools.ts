@@ -153,61 +153,6 @@ export const useToolsFunctions = () => {
     }
   };
 
-  const spotifyPlayback = async ({
-    action,
-    track_id,
-    playlist_id,
-    artist_id,
-    num_skips,
-  }: {
-    action: "get" | "start" | "pause" | "skip";
-    track_id?: string;
-    playlist_id?: string;
-    artist_id?: string;
-    num_skips?: number;
-  }) => {
-    try {
-      const result = await mcpClient.callSpotifyTool("SpotifyPlayback", {
-        action,
-        track_id,
-        playlist_id,
-        artist_id,
-        num_skips: num_skips || 1,
-      });
-
-      const actionMessages = {
-        get: "Got playback information",
-        start: track_id
-          ? "Started playing track"
-          : playlist_id
-          ? "Started playing playlist"
-          : artist_id
-          ? "Started playing artist"
-          : "Resumed playback",
-        pause: "Paused playback",
-        skip: `Skipped ${num_skips || 1} track(s)`,
-      };
-
-      const successMessage = actionMessages[action];
-      toast.success("Spotify Playback 🎵", { description: successMessage });
-
-      return {
-        success: true,
-        result,
-        message: successMessage,
-      };
-    } catch (error) {
-      console.error("Failed to control Spotify playback:", error);
-      toast.error("Spotify Playback Error ❌", {
-        description: `Failed to control playback: ${error}`,
-      });
-      return {
-        success: false,
-        message: `Failed to control playback: ${error}`,
-      };
-    }
-  };
-
   return {
     timeFunction,
     launchWebsite,

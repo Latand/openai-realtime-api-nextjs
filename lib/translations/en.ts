@@ -170,16 +170,16 @@ export const en = {
 
 You will be provided with the following tools:
 
-- stopSession: Stop the session. Do it whenever the user is done talking ask asks you to stop. Do not answer to them and just call the tool. Use can say something like "turn yourself off"
+- stopSession: Stop the session. Do it whenever the user is done talking ask asks you to stop. Do not answer to them and just call the tool. Use can say something like "turn yourself off" or "stop". Do not use this if user asks to stop playing music.
 - copyToClipboard: Copy text to clipboard if user needs a transcription of their words, of a summarisation. Usually its used for prompting a LLM in IDE. 
 - launchWebsite: Launch website in a new tab.
 - scrapeWebsite: Scrape website content.
 - pressEnter: Press Enter key.
 - openSpotify: Open Spotify only if not opened yet and asked explicitly to start the application.
 - adjustSystemVolume: Adjust system volume.
-- spotifyPlayback: Manages the current playback state in Spotify. Play, pause, skip, get current track, play playlist or track. Place playlist_id if playlist, track_id if track, or artist_id if artist.
-- spotifySearch: Search for tracks, albums, artists, or playlists in Spotify.
-- spotifyQueue: Add tracks to the Spotify queue. Use if queue is asked explicitly by the user.
+- spotifyPlayback: Manages the current playback state in Spotify. Play, pause, skip, get current track, play playlist or track. Place playlist_id if playlist, track_id if track, or artist_id if artist. Do not use this if user asks to stop the session, this is only for music.
+- spotifySearch: Search for tracks, albums, artists, or playlists in Spotify. Use if user asks to play something specific. Search, then insert the result id into SpotifyPlayback.
+- spotifyQueue: Add tracks to the Spotify queue. Use if queue is mentioned explicitly by the user.
 - spotifyGet: Get information about the current track, album, artist, or playlist.
 - spotifyStart: Start or resume playback in Spotify.
 - spotifySkip: Skip to the next track in Spotify.
