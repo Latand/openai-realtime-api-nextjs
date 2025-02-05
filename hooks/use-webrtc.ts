@@ -447,6 +447,30 @@ export default function useWebRTCAudioSession(
       setStatus("Establishing connection...");
       const pc = new RTCPeerConnection();
       peerConnectionRef.current = pc;
+
+      // Create a dummy video track
+      const dummyVideo = document.createElement("canvas");
+      dummyVideo.width = 640;
+      dummyVideo.height = 480;
+      const ctx = dummyVideo.getContext("2d");
+      if (ctx) {
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(0, 0, dummyVideo.width, dummyVideo.height);
+      }
+      const dummyStream = dummyVideo.captureStream(1); // 1 fps
+      const videoTrack = dummyStream.getVideoTracks()[0];
+
+      // Add transceivers for both audio and video
+      pc.addTransceiver("audio", { direction: "sendrecv" });
+      pc.addTransceiver("video", {
+        direction: "sendrecv",
+        streams: [dummyStream],
+      });
+
+      // Add tracks
+      pc.addTrack(stream.getTracks()[0]); // Audio track
+      pc.addTrack(videoTrack); // Video track
+
       // Create hidden audio element for inbound TTS
       const audioEl = document.createElement("audio");
       audioEl.autoplay = true;
@@ -470,8 +494,7 @@ export default function useWebRTCAudioSession(
         configureDataChannel(dataChannel);
       };
       dataChannel.onmessage = handleDataChannelMessage;
-      // Add local audio track.
-      pc.addTrack(stream.getTracks()[0]);
+
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       const baseUrl = "https://api.openai.com/v1/realtime";
