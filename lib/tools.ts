@@ -67,6 +67,13 @@ const toolDefinitions = {
       },
     },
   },
+  readClipboard: {
+    description: "Reads the current content from the system clipboard",
+    parameters: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
 } as const;
 
 const tools: Tool[] = Object.entries(toolDefinitions).map(([name, config]) => ({

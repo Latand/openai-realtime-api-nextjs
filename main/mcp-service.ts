@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ipcMain } from "electron";
+import { existsSync } from "fs";
 
 class MCPService {
   private client: Client | null = null;
@@ -8,14 +9,18 @@ class MCPService {
 
   async initialize() {
     try {
+      const mcpDir = process.env.MCP_SPOTIFY_DIR;
+      if (!mcpDir || !existsSync(mcpDir)) {
+        console.warn(
+          "MCP_SPOTIFY_DIR is not set or does not exist. Skipping MCP init."
+        );
+        return false;
+      }
+      const command = process.env.MCP_SPOTIFY_COMMAND || "uv";
+      const entry = process.env.MCP_SPOTIFY_ENTRY || "spotify-mcp";
       this.transport = new StdioClientTransport({
-        command: "uv",
-        args: [
-          "--directory",
-          "/home/latand/Projects/spotify-mcp",
-          "run",
-          "spotify-mcp",
-        ],
+        command,
+        args: ["--directory", mcpDir, "run", entry],
       });
 
       this.client = new Client(
@@ -98,7 +103,15 @@ class MCPService {
       }
     });
     ipcMain.handle("mcp:getTools", async () => {
-      return await this.getTools();
+      try {
+        const tools = await this.getTools();
+        return { success: true, tools };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
     });
   }
 }

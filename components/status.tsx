@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { toast } from 'sonner'
 import { useTranslations } from "@/components/translations-context"
 
@@ -10,7 +10,12 @@ interface StatusDisplayProps {
 
 export function StatusDisplay({ status }: StatusDisplayProps) {
   const { t } = useTranslations();
+  const lastStatusRef = useRef<string>("")
   useEffect(() => {
+    if (!status || status === lastStatusRef.current) {
+      return
+    }
+    lastStatusRef.current = status
     if (status.startsWith("Error")) {
       toast.error(t('status.error'), {
         description: status,
@@ -23,7 +28,7 @@ export function StatusDisplay({ status }: StatusDisplayProps) {
             duration: 5000,
         })
     }
-    else {
+    else if (status.startsWith("Session stopped") || status.startsWith("Reconnecting")) {
       toast.info(t('status.info'), {
         description: status,
         duration: 3000,

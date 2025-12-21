@@ -91,6 +91,10 @@ export const en = {
       description: "You can now paste it somewhere.",
       success: "Text copied to clipboard. Ask the user to paste it somewhere.",
       toast: "Text copied to clipboard!",
+      read: {
+        toast: "Clipboard read!",
+        success: "Clipboard contents read successfully.",
+      },
     },
     launchWebsite: {
       description: "Failed to launch website",

@@ -78,7 +78,11 @@ export const es = {
     clipboard: {
       description: "Ahora puedes pegarlo en algún lugar.",
       success: "Texto copiado al portapapeles. Pide al usuario que lo pegue en algún lugar.",
-      toast: "¡Texto copiado al portapapeles!"
+      toast: "¡Texto copiado al portapapeles!",
+      read: {
+        toast: "¡Portapapeles leído!",
+        success: "Contenido del portapapeles leído correctamente."
+      }
     },
     launchWebsite: {
       description: "Error al abrir el sitio web",

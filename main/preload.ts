@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("electron", {
   clipboard: {
+    write: (text: string) => ipcRenderer.invoke("clipboard:write", text),
     writeAndPaste: (text: string) =>
       ipcRenderer.invoke("clipboard:writeAndPaste", text),
     writeAndEnter: (text: string) =>

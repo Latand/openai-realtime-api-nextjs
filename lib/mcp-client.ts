@@ -1,6 +1,9 @@
 // Client-side MCP service that uses IPC bridge
 class MCPClientService {
-  async callSpotifyTool(action: string, params: Record<string, any> = {}) {
+  async callSpotifyTool(
+    action: string,
+    params: Record<string, unknown> = {}
+  ) {
     if (!window.electron?.mcp) {
       throw new Error("MCP functionality not available");
     }
@@ -16,13 +19,22 @@ class MCPClientService {
     try {
       if (!window.electron?.mcp) {
         console.warn("MCP functionality not available yet");
-        return [];
+        return { success: false, error: "MCP not available" };
       }
       const result = await window.electron.mcp.getTools();
-      return result || [];
+      if (Array.isArray(result)) {
+        return { success: true, tools: result };
+      }
+      if (result && typeof result === "object" && "success" in result) {
+        return result as { success: boolean; tools?: unknown; error?: string };
+      }
+      return { success: false, error: "Unexpected MCP tools response" };
     } catch (error) {
       console.error("Failed to get MCP tools:", error);
-      return [];
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 }

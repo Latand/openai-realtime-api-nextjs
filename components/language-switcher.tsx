@@ -24,8 +24,9 @@ export function LanguageSwitcher() {
   const selectedLanguage = languages.find(lang => lang.code === locale)
 
   const onSelect = (value: string) => {
+    const nextLanguage = languages.find((lang) => lang.code === value)
     setLocale(value);
-    toast.success(`${t('status.language')} ${locale}`)
+    toast.success(`${t('status.language')} ${nextLanguage?.label || value}`)
   }
 
   return (

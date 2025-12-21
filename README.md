@@ -28,6 +28,14 @@ cd openai-realtime-api-nextjs
 Create a `.env` file in the root directory:
 ```env
 OPENAI_API_KEY=your-openai-api-key
+FIRECRAWL_API_KEY=your-firecrawl-api-key
+# Optional: require a shared secret for /api/session and /api/scrape
+SESSION_SECRET=your-session-secret
+NEXT_PUBLIC_SESSION_SECRET=your-session-secret
+NEXT_PUBLIC_PICOVOICE_ACCESS_KEY=your-picovoice-access-key
+MCP_SPOTIFY_DIR=/absolute/path/to/spotify-mcp
+MCP_SPOTIFY_COMMAND=uv
+MCP_SPOTIFY_ENTRY=spotify-mcp
 ```
 
 ### 3. Install Dependencies

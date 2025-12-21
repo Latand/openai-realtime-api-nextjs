@@ -3,21 +3,69 @@ import {
   BrowserWindow,
   ipcMain,
   clipboard,
-  globalShortcut,
   screen,
 } from "electron";
 import * as path from "path";
-import { format } from "url";
-import { exec, spawn } from "child_process";
+import next from "next";
+import { createServer, Server } from "http";
+import { execFile, spawn } from "child_process";
 import { promisify } from "util";
 import { mcpService } from "./mcp-service";
 
-const execAsync = promisify(exec);
-const isDevelopment = process.env.NODE_ENV !== "production";
+const execFileAsync = promisify(execFile);
+const isDevelopment = !app.isPackaged;
 
 let mainWindow: BrowserWindow | null = null;
+let nextServer: Server | null = null;
+let nextServerUrl: string | null = null;
 
-function createMainWindow(): BrowserWindow {
+function clampPercentage(percentage: number) {
+  const value = Number(percentage);
+  if (!Number.isFinite(value)) {
+    throw new Error("Invalid percentage");
+  }
+  return Math.min(Math.max(value, 0), 100);
+}
+
+async function startNextServer(): Promise<string> {
+  if (nextServerUrl) {
+    return nextServerUrl;
+  }
+
+  const appPath = app.getAppPath();
+  const nextApp = next({ dev: false, dir: appPath });
+  const handle = nextApp.getRequestHandler();
+
+  await nextApp.prepare();
+
+  nextServer = createServer((req, res) => {
+    handle(req, res);
+  });
+
+  return new Promise((resolve, reject) => {
+    nextServer?.once("error", reject);
+    nextServer?.listen(0, "127.0.0.1", () => {
+      const address = nextServer?.address();
+      if (address && typeof address === "object") {
+        nextServerUrl = `http://127.0.0.1:${address.port}`;
+        resolve(nextServerUrl);
+        return;
+      }
+      reject(new Error("Failed to start Next.js server"));
+    });
+  });
+}
+
+async function stopNextServer() {
+  if (!nextServer) return;
+  await new Promise<void>((resolve) => {
+    nextServer?.close(() => resolve());
+  });
+  nextServer = null;
+  nextServerUrl = null;
+}
+
+async function createMainWindow(): Promise<BrowserWindow> {
   const { width: screenWidth, height: screenHeight } =
     screen.getPrimaryDisplay().workAreaSize;
   const windowWidth = 400;
@@ -34,7 +82,7 @@ function createMainWindow(): BrowserWindow {
     autoHideMenuBar: true,
     frame: true,
     alwaysOnTop: true,
-    x: screenWidth - windowWidth * 3, // Touch the right edge
+    x: screenWidth - windowWidth, // Touch the right edge
     y: Math.floor((screenHeight - windowHeight) / 2), // Center vertically
   });
 
@@ -43,17 +91,16 @@ function createMainWindow(): BrowserWindow {
 
   if (isDevelopment) {
     setTimeout(() => {
-      window.loadURL("http://localhost:3000");
+      void window.loadURL("http://localhost:3000");
       // window.webContents.openDevTools();
     }, 1000);
   } else {
-    window.loadURL(
-      format({
-        pathname: path.join(__dirname, "../renderer/out/index.html"),
-        protocol: "file",
-        slashes: true,
-      })
-    );
+    try {
+      const serverUrl = await startNextServer();
+      await window.loadURL(serverUrl);
+    } catch (error) {
+      console.error("Failed to start Next.js server:", error);
+    }
   }
 
   window.on("closed", () => {
@@ -72,13 +119,15 @@ app.on("window-all-closed", () => {
 
 app.on("activate", () => {
   if (mainWindow === null) {
-    mainWindow = createMainWindow();
+    void createMainWindow().then((window) => {
+      mainWindow = window;
+    });
   }
 });
 
 // Create main BrowserWindow when electron is ready
 app.on("ready", async () => {
-  mainWindow = createMainWindow();
+  mainWindow = await createMainWindow();
 
   // Initialize MCP service
   await mcpService.initialize();
@@ -93,30 +142,21 @@ app.on("ready", async () => {
 app.on("will-quit", async () => {
   // Cleanup MCP service
   await mcpService.disconnect();
+  await stopNextServer();
 });
 
 // Function to simulate keyboard actions
 async function simulateKeyPress(key: string): Promise<void> {
-  if (process.platform === "linux") {
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      await execAsync(`xdotool key ${key}`);
-    } catch (error) {
-      console.error("Failed to simulate key press:", error);
-    }
+  if (process.platform !== "linux") {
+    throw new Error("Keyboard simulation is only supported on Linux");
   }
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await execFileAsync("xdotool", ["key", key]);
 }
 
 // Function to simulate paste keystroke
 async function simulatePaste(): Promise<void> {
-  if (process.platform === "linux") {
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      await execAsync("xdotool key ctrl+v");
-    } catch (error) {
-      console.error("Failed to simulate paste:", error);
-    }
-  }
+  await simulateKeyPress("ctrl+v");
 }
 
 // Handle keyboard operations
@@ -147,9 +187,16 @@ async function adjustSystemVolume(
   percentage: number
 ): Promise<{ success: boolean }> {
   try {
-    console.log(`[SystemVolume] Setting volume to ${percentage}%`);
-    const command = `wpctl set-volume @DEFAULT_AUDIO_SINK@ ${percentage}%`;
-    await execAsync(command);
+    if (process.platform !== "linux") {
+      throw new Error("System volume control is only supported on Linux");
+    }
+    const safePercentage = clampPercentage(percentage);
+    console.log(`[SystemVolume] Setting volume to ${safePercentage}%`);
+    await execFileAsync("wpctl", [
+      "set-volume",
+      "@DEFAULT_AUDIO_SINK@",
+      `${safePercentage}%`,
+    ]);
     return { success: true };
   } catch (error) {
     console.error("[SystemVolume] Failed to adjust volume:", error);
@@ -170,20 +217,25 @@ ipcMain.handle("system:adjustSystemVolume", async (_, percentage: number) => {
   }
 });
 
-// Function to type text using xdotool
-async function typeText(text: string): Promise<void> {
-  try {
-    await execAsync(`xdotool type "${text}"`);
-  } catch (error) {
-    console.error("Failed to type text:", error);
-    throw error;
-  }
-}
-
 // Clipboard controls
 ipcMain.handle("clipboard:writeAndPaste", async (_, text: string) => {
   try {
     await clipboard.writeText(text);
+    await simulatePaste();
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+});
+
+ipcMain.handle("clipboard:writeAndEnter", async (_, text: string) => {
+  try {
+    await clipboard.writeText(text);
+    await simulatePaste();
+    await simulateKeyPress("Return");
     return { success: true };
   } catch (error) {
     return {
@@ -204,21 +256,13 @@ ipcMain.handle("clipboard:read", async () => {
   }
 });
 
-// Add a helper function for command execution with logging
-async function execWithLogging(command: string, context: string) {
-  console.log(`[${context}] Executing command: ${command}`);
-  try {
-    const { stdout, stderr } = await execAsync(command);
-    if (stdout) console.log(`[${context}] stdout:`, stdout.trim());
-    if (stderr) console.warn(`[${context}] stderr:`, stderr.trim());
-    return { stdout, stderr };
-  } catch (error) {
-    console.error(`[${context}] Command failed:`, error);
-    throw error;
-  }
-}
-
 ipcMain.handle("system:openSpotify", () => {
+  if (process.platform !== "linux") {
+    return Promise.resolve({
+      success: false,
+      error: "Spotify launch is only supported on Linux",
+    });
+  }
   return new Promise((resolve) => {
     // Use spawn with shell option to handle the command better
     const spotify = spawn("spotify", [], {
@@ -242,7 +286,7 @@ ipcMain.handle("system:openSpotify", () => {
     // Wait a bit to check if process started
     setTimeout(async () => {
       try {
-        const { stdout } = await execAsync("pidof spotify");
+        const { stdout } = await execFileAsync("pidof", ["spotify"]);
         console.log("Spotify started, PID:", stdout.trim());
         resolve({ success: true });
       } catch (error) {
@@ -256,26 +300,30 @@ ipcMain.handle("system:openSpotify", () => {
   });
 });
 
-ipcMain.handle("system:adjustVolume", (_, percentage: number) => {
-  return new Promise((resolve) => {
-    // Convert percentage to decimal (0-1 range)
-    const volume = Math.min(Math.max(percentage, 0), 100) / 100;
-
-    // Use D-Bus to set Spotify's volume specifically with correct variant syntax
-    const command = `dbus-send --print-reply --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.freedesktop.DBus.Properties.Set string:"org.mpris.MediaPlayer2.Player" string:"Volume" variant:double:${volume}`;
-
-    console.log(`[Volume] Executing command: ${command}`);
-    exec(command, (error, stdout, stderr) => {
-      if (error) {
-        console.error(`Error: ${error.message}`);
-        resolve({ success: false, error: error.message });
-        return;
-      }
-      if (stderr) {
-        console.error(`Stderr: ${stderr}`);
-      }
-      console.log(`Output: ${stdout}`);
-      resolve({ success: true });
-    });
-  });
+ipcMain.handle("system:adjustVolume", async (_, percentage: number) => {
+  try {
+    if (process.platform !== "linux") {
+      return {
+        success: false,
+        error: "Spotify volume control is only supported on Linux",
+      };
+    }
+    const volume = clampPercentage(percentage) / 100;
+    const args = [
+      "--print-reply",
+      "--dest=org.mpris.MediaPlayer2.spotify",
+      "/org/mpris/MediaPlayer2",
+      "org.freedesktop.DBus.Properties.Set",
+      "string:org.mpris.MediaPlayer2.Player",
+      "string:Volume",
+      `variant:double:${volume}`,
+    ];
+    await execFileAsync("dbus-send", args);
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 });

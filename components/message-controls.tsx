@@ -122,7 +122,7 @@ export function MessageControls({ conversation, msgs }: { conversation: Conversa
                   {filteredMsgs.map((msg, i) => (
                     <TableRow key={i}>
                       <TableCell className="font-medium">{msg.type}</TableCell>
-                      <TableCell className="font-mono text-sm whitespace-pre-wrap break-words max-w-full]">
+                      <TableCell className="font-mono text-sm whitespace-pre-wrap break-words max-w-full">
                         {JSON.stringify(msg, null, 2)}
                       </TableCell>
                     </TableRow>

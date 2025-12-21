@@ -22,6 +22,7 @@ declare module "@modelcontextprotocol/sdk/client/index.js" {
     connect(transport: any): Promise<void>;
     disconnect(): Promise<void>;
     callTool(tool: ToolCall): Promise<any>;
+    listTools(): Promise<any>;
     listPrompts(): Promise<any>;
     getPrompt(name: string, args: Record<string, any>): Promise<any>;
     listResources(): Promise<any>;

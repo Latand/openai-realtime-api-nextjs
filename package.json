@@ -2,11 +2,12 @@
   "name": "webrtc-voice-next",
   "version": "0.1.0",
   "private": true,
-  "main": "app/index.js",
+  "main": "dist-electron/index.js",
   "author": {
     "name": "latand",
     "email": "latand666@gmail.com"
   },
+  "homepage": "https://github.com/cameronking4/openai-realtime-api-nextjs",
   "description": "OpenAI Realtime API with WebRTC voice chat",
   "scripts": {
     "dev": "next dev --turbopack",
@@ -15,7 +16,7 @@
     "lint": "next lint",
     "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && tsc -p main && electron .\"",
     "electron-build": "next build && tsc -p main && electron-builder",
-    "electron-start": "electron ."
+    "electron-start": "tsc -p main && electron ."
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

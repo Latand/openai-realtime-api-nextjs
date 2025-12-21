@@ -78,7 +78,11 @@ export const fr = {
         clipboard: {
             description: "Vous pouvez maintenant le coller quelque part.",
             success: "Texte copié dans le presse-papiers. Demandez à l'utilisateur de le coller quelque part.",
-            toast: "Texte copié dans le presse-papiers !"
+            toast: "Texte copié dans le presse-papiers !",
+            read: {
+                toast: "Presse-papiers lu !",
+                success: "Contenu du presse-papiers lu avec succès."
+            }
         },
         launchWebsite: {
             description: "Échec du lancement du site web",

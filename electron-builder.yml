@@ -8,6 +8,10 @@ files:
   - from: .
     filter:
       - package.json
+      - dist-electron
+      - .next
+      - public
+      - next.config.js
       - app
 publish: null
 win:

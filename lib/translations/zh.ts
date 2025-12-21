@@ -78,7 +78,11 @@ export const zh = {
         clipboard: {
             description: "您现在可以将其粘贴到某处。",
             success: "文本已复制到剪贴板。请让用户将其粘贴到某处。",
-            toast: "文本已复制到剪贴板！"
+            toast: "文本已复制到剪贴板！",
+            read: {
+                toast: "已读取剪贴板！",
+                success: "已成功读取剪贴板内容。"
+            }
         },
         launchWebsite: {
             description: "启动网站失败",

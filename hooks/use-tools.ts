@@ -2,13 +2,31 @@
 
 import { toast } from "sonner";
 import { useTranslations } from "@/components/translations-context";
-import FirecrawlApp, { ScrapeResponse } from "@mendable/firecrawl-js";
 import { mcpClient } from "@/lib/mcp-client";
 import { useState, useEffect } from "react";
 import type { Tool } from "@/hooks/use-webrtc";
 
 export const useToolsFunctions = () => {
   const { t } = useTranslations();
+
+  const normalizeUrl = (url: string) => {
+    const trimmed = url.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const withScheme = /^https?:\/\//i.test(trimmed)
+      ? trimmed
+      : `https://${trimmed}`;
+    try {
+      const parsed = new URL(withScheme);
+      if (!["http:", "https:"].includes(parsed.protocol)) {
+        return null;
+      }
+      return parsed.toString();
+    } catch {
+      return null;
+    }
+  };
 
   const stopSession = async () => {
     try {
@@ -46,17 +64,65 @@ export const useToolsFunctions = () => {
   };
 
   const launchWebsite = ({ url }: { url: string }) => {
-    window.open(url, "_blank");
+    const normalizedUrl = normalizeUrl(url);
+    if (!normalizedUrl) {
+      toast.error(t("tools.launchWebsite") + " ❌", {
+        description: "Invalid or unsupported URL.",
+      });
+      return {
+        success: false,
+        message: "Invalid or unsupported URL.",
+      };
+    }
+    const newWindow = window.open(
+      normalizedUrl,
+      "_blank",
+      "noopener,noreferrer"
+    );
+    if (newWindow) {
+      newWindow.opener = null;
+    }
     toast(t("tools.launchWebsite") + " 🌐", {
       description:
         t("tools.launchWebsiteSuccess") +
-        url +
+        normalizedUrl +
         ", tell the user it's been launched.",
     });
     return {
       success: true,
-      message: `Launched the site${url}, tell the user it's been launched.`,
+      message: `Launched the site ${normalizedUrl}, tell the user it's been launched.`,
     };
+  };
+
+  const readClipboard = async () => {
+    try {
+      let text = "";
+      if (window.electron?.clipboard) {
+        const result = await window.electron.clipboard.readText();
+        if (!result.success) {
+          throw new Error(result.error || "Failed to read clipboard");
+        }
+        text = result.text || "";
+      } else {
+        text = await navigator.clipboard.readText();
+      }
+
+      toast.success(t("tools.clipboard.read.toast") + " 📋", {
+        description: t("tools.clipboard.read.success"),
+      });
+
+      return {
+        success: true,
+        text,
+        message: `Successfully read from clipboard: ${text}`,
+      };
+    } catch (error) {
+      console.error("Failed to read clipboard:", error);
+      return {
+        success: false,
+        message: `Failed to read clipboard: ${error}`,
+      };
+    }
   };
 
   const pasteText = async ({ text }: { text: string }) => {
@@ -85,20 +151,33 @@ export const useToolsFunctions = () => {
   };
 
   const scrapeWebsite = async ({ url }: { url: string }) => {
-    const apiKey = process.env.NEXT_PUBLIC_FIRECRAWL_API_KEY;
     try {
-      const app = new FirecrawlApp({ apiKey: apiKey });
-      const scrapeResult = (await app.scrapeUrl(url, {
-        formats: ["markdown", "html"],
-      })) as ScrapeResponse;
-
-      if (!scrapeResult.success) {
-        console.log(scrapeResult.error);
+      const normalizedUrl = normalizeUrl(url);
+      if (!normalizedUrl) {
         return {
           success: false,
-          message: `Failed to scrape: ${scrapeResult.error}`,
+          message: "Invalid or unsupported URL.",
         };
       }
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (process.env.NEXT_PUBLIC_SESSION_SECRET) {
+        headers["x-session-secret"] = process.env.NEXT_PUBLIC_SESSION_SECRET;
+      }
+      const response = await fetch("/api/scrape", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ url: normalizedUrl }),
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        return {
+          success: false,
+          message: `Failed to scrape: ${errorText || response.status}`,
+        };
+      }
+      const scrapeResult = await response.json();
 
       toast.success(t("tools.scrapeWebsite.toast") + " 📋", {
         description: t("tools.scrapeWebsite.success"),
@@ -109,7 +188,7 @@ export const useToolsFunctions = () => {
         message:
           "Here is the scraped website content: " +
           JSON.stringify(scrapeResult.markdown) +
-          "Summarize and explain it to the user now in a response.",
+          " Summarize and explain it to the user now in a response.",
       };
     } catch (error) {
       return {
@@ -121,17 +200,25 @@ export const useToolsFunctions = () => {
 
   const adjustSystemVolume = async ({ percentage }: { percentage: number }) => {
     try {
+      const parsed = Number(percentage);
+      if (!Number.isFinite(parsed)) {
+        return {
+          success: false,
+          message: "Invalid volume percentage",
+        };
+      }
+      const clamped = Math.min(Math.max(parsed, 0), 100);
       if (window.electron?.system) {
         const result = await window.electron.system.adjustSystemVolume(
-          percentage
+          clamped
         );
         if (result.success) {
           toast.success(t("tools.volume.toast") + " 🔊", {
-            description: t("tools.volume.success") + ` ${percentage}%`,
+            description: t("tools.volume.success") + ` ${clamped}%`,
           });
           return {
             success: true,
-            message: `System volume adjusted to ${percentage}%`,
+            message: `System volume adjusted to ${clamped}%`,
           };
         } else {
           throw new Error(result.error || "Failed to adjust system volume");
@@ -156,6 +243,7 @@ export const useToolsFunctions = () => {
   return {
     timeFunction,
     launchWebsite,
+    readClipboard,
     pasteText,
     scrapeWebsite,
     stopSession,
@@ -177,9 +265,11 @@ interface MCPToolsResponse {
   error?: string;
 }
 
+type ToolHandler = (...args: unknown[]) => unknown;
+
 export const useMCPFunctions = () => {
   const [wrappedFunctions, setWrappedFunctions] = useState<
-    Record<string, Function>
+    Record<string, ToolHandler>
   >({});
   const [toolDefinitions, setToolDefinitions] = useState<Tool[]>([]);
 
@@ -187,8 +277,14 @@ export const useMCPFunctions = () => {
     const loadTools = async () => {
       try {
         const response = (await mcpClient.getTools()) as MCPToolsResponse;
+        if (!response.success) {
+          if (response.error) {
+            console.warn("MCP tools unavailable:", response.error);
+          }
+          return;
+        }
         const toolsArray = response.tools || [];
-        const newWrappedFunctions: Record<string, Function> = {};
+        const newWrappedFunctions: Record<string, ToolHandler> = {};
         const newToolDefinitions: Tool[] = [];
 
         toolsArray.forEach((tool: MCPTool) => {

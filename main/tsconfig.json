@@ -4,7 +4,7 @@
     "module": "commonjs",
     "moduleResolution": "node",
     "sourceMap": true,
-    "outDir": "../app",
+    "outDir": "../dist-electron",
     "rootDir": "./",
     "strict": true,
     "esModuleInterop": true,

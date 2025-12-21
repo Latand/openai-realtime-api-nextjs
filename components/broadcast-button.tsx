@@ -1,6 +1,5 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useTranslations } from "@/components/translations-context";
 
 interface BroadcastButtonProps {
   isSessionActive: boolean;

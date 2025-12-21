@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, type RefObject } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { Conversation } from "@/lib/conversations";
 import { useTranslations } from "@/components/translations-context";
@@ -21,18 +21,24 @@ export interface Tool {
   };
 }
 
+type ToolHandler = (...args: unknown[]) => unknown;
+
 /**
  * The return type for the hook, matching Approach A
  * (RefObject<HTMLDivElement | null> for the audioIndicatorRef).
  */
+type StopSessionOptions = {
+  preserveStatus?: boolean;
+};
+
 interface UseWebRTCAudioSessionReturn {
   status: string;
   isSessionActive: boolean;
-  audioIndicatorRef: React.RefObject<HTMLDivElement | null>;
+  audioIndicatorRef: RefObject<HTMLDivElement | null>;
   startSession: () => Promise<void>;
-  stopSession: () => void;
+  stopSession: (options?: StopSessionOptions) => void;
   handleStartStopClick: () => void;
-  registerFunction: (name: string, fn: Function) => void;
+  registerFunction: (name: string, fn: ToolHandler) => void;
   msgs: any[];
   currentVolume: number;
   conversation: Conversation[];
@@ -127,10 +133,8 @@ export default function useWebRTCAudioSession(
       combinedTools.push(...formattedMcpTools);
     }
 
-    if (combinedTools.length > 0) {
-      console.log("Setting combined tools:", JSON.stringify(combinedTools));
-      setAllTools(combinedTools);
-    }
+    console.log("Setting combined tools:", JSON.stringify(combinedTools));
+    setAllTools(combinedTools);
   }, [toolDefinitions, mcpDefinitions]);
 
   // Audio references for local mic
@@ -141,9 +145,18 @@ export default function useWebRTCAudioSession(
   // WebRTC references
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
+  const inboundAudioContextRef = useRef<AudioContext | null>(null);
+  const dummyVideoTrackRef = useRef<MediaStreamTrack | null>(null);
 
   // Flag to prevent parallel session starts.
   const isStartingRef = useRef<boolean>(false);
+  const isStoppingRef = useRef<boolean>(false);
+  const isSessionActiveRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    isSessionActiveRef.current = isSessionActive;
+  }, [isSessionActive]);
 
   // Keep track of all raw events/messages
   const [msgs, setMsgs] = useState<any[]>([]);
@@ -152,12 +165,13 @@ export default function useWebRTCAudioSession(
   const [conversation, setConversation] = useState<Conversation[]>([]);
 
   // For function calls (AI "tools")
-  const functionRegistry = useRef<Record<string, Function>>({});
+  const functionRegistry = useRef<Record<string, ToolHandler>>({});
 
   // Volume analysis (assistant inbound audio)
   const [currentVolume, setCurrentVolume] = useState(0);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const volumeIntervalRef = useRef<number | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
 
   /**
    * We track only the ephemeral user message **ID** here.
@@ -168,35 +182,41 @@ export default function useWebRTCAudioSession(
   /**
    * Register a function (tool) so the AI can call it.
    */
-  function registerFunction(name: string, fn: Function) {
+  function registerFunction(name: string, fn: ToolHandler) {
     functionRegistry.current[name.toLowerCase()] = fn;
   }
 
   /**
-   * Configure the data channel on open, sending a session update to the server.
-   * Sends the update only once per session.
+   * Send a session update to the server, reusing the data channel once open.
+   * Updates are deduplicated by payload.
    */
-  const sessionUpdateSentRef = useRef<boolean>(false);
-  const configureDataChannel = (dataChannel: RTCDataChannel) => {
-    console.log("allTools SENDING", JSON.stringify(allTools));
-    if (!sessionUpdateSentRef.current) {
-      const sessionUpdate = {
-        type: "session.update",
-        session: {
-          modalities: ["text", "audio"],
-          tools: allTools,
-          input_audio_transcription: {
-            model: "whisper-1",
-          },
-          instructions: t("languagePrompt"),
+  const lastSessionUpdateRef = useRef<string | null>(null);
+  const sendSessionUpdate = useCallback(() => {
+    const dataChannel = dataChannelRef.current;
+    if (!dataChannel || dataChannel.readyState !== "open") return;
+    const sessionUpdate = {
+      type: "session.update",
+      session: {
+        modalities: ["text", "audio"],
+        tools: allTools,
+        input_audio_transcription: {
+          model: "whisper-1",
         },
-      };
-      dataChannel.send(JSON.stringify(sessionUpdate));
-      console.log("Session update sent:", sessionUpdate);
-      console.log("Setting locale: " + t("language") + " : " + locale);
-      sessionUpdateSentRef.current = true;
-    }
-  };
+        instructions: t("languagePrompt"),
+      },
+    };
+    const payload = JSON.stringify(sessionUpdate);
+    if (lastSessionUpdateRef.current === payload) return;
+    dataChannel.send(payload);
+    console.log("Session update sent:", sessionUpdate);
+    console.log("Setting locale: " + t("language") + " : " + locale);
+    lastSessionUpdateRef.current = payload;
+  }, [allTools, locale, t]);
+
+  useEffect(() => {
+    if (!isSessionActiveRef.current) return;
+    sendSessionUpdate();
+  }, [sendSessionUpdate]);
 
   /**
    * Return an ephemeral user ID, creating a new ephemeral message in conversation if needed.
@@ -240,14 +260,28 @@ export default function useWebRTCAudioSession(
   /**
    * Main data channel message handler: interprets events from the server.
    */
+  async function restartSession(reason: string) {
+    if (isStartingRef.current || isStoppingRef.current) return;
+    if (!isSessionActiveRef.current) return;
+    console.warn(`Restarting session: ${reason}`);
+    setStatus(`Reconnecting: ${reason}`);
+    stopSession({ preserveStatus: true });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await startSession();
+  }
+
   async function handleDataChannelMessage(event: MessageEvent) {
     try {
       const msg = JSON.parse(event.data);
-      if (dataChannelRef.current?.readyState === "closed" && isSessionActive) {
+      if (
+        dataChannelRef.current?.readyState === "closed" &&
+        isSessionActiveRef.current &&
+        !isStoppingRef.current
+      ) {
         console.log(
           "Data channel closed unexpectedly, attempting to reconnect..."
         );
-        await startSession();
+        await restartSession("data channel closed");
         return;
       }
       switch (msg.type) {
@@ -313,7 +347,12 @@ export default function useWebRTCAudioSession(
           setConversation((prev) => {
             if (prev.length === 0) return prev;
             const updated = [...prev];
-            updated[updated.length - 1].isFinal = true;
+            for (let i = updated.length - 1; i >= 0; i -= 1) {
+              if (updated[i].role === "assistant") {
+                updated[i].isFinal = true;
+                break;
+              }
+            }
             return updated;
           });
           break;
@@ -321,20 +360,54 @@ export default function useWebRTCAudioSession(
         case "response.function_call_arguments.done": {
           console.log("response.function_call_arguments.done", msg);
           const fn = functionRegistry.current[msg.name.toLowerCase()];
+          let parsedArgs: Record<string, any> = {};
+          if (msg.arguments) {
+            try {
+              parsedArgs = JSON.parse(msg.arguments);
+            } catch (error) {
+              const errorResponse = {
+                type: "conversation.item.create",
+                item: {
+                  type: "function_call_output",
+                  call_id: msg.call_id,
+                  output: JSON.stringify({
+                    error: `Failed to parse tool arguments: ${error}`,
+                  }),
+                },
+              };
+              dataChannelRef.current?.send(JSON.stringify(errorResponse));
+              dataChannelRef.current?.send(
+                JSON.stringify({ type: "response.create" })
+              );
+              break;
+            }
+          }
           if (fn) {
-            const args = JSON.parse(msg.arguments);
-            const result = await fn(args);
-            const response = {
-              type: "conversation.item.create",
-              item: {
-                type: "function_call_output",
-                call_id: msg.call_id,
-                output: JSON.stringify(result),
-              },
-            };
-            dataChannelRef.current?.send(JSON.stringify(response));
+            try {
+              const result = await fn(parsedArgs);
+              const response = {
+                type: "conversation.item.create",
+                item: {
+                  type: "function_call_output",
+                  call_id: msg.call_id,
+                  output: JSON.stringify(result),
+                },
+              };
+              dataChannelRef.current?.send(JSON.stringify(response));
+            } catch (error) {
+              const errorResponse = {
+                type: "conversation.item.create",
+                item: {
+                  type: "function_call_output",
+                  call_id: msg.call_id,
+                  output: JSON.stringify({
+                    error: `Tool execution failed: ${error}`,
+                  }),
+                },
+              };
+              dataChannelRef.current?.send(JSON.stringify(errorResponse));
+            }
           } else {
-            // Send error response when function is not found
             const errorResponse = {
               type: "conversation.item.create",
               item: {
@@ -366,11 +439,18 @@ export default function useWebRTCAudioSession(
   /**
    * Fetch ephemeral token from your Next.js endpoint.
    */
-  async function getEphemeralToken() {
+  async function getEphemeralToken(selectedVoice: string) {
     try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (process.env.NEXT_PUBLIC_SESSION_SECRET) {
+        headers["x-session-secret"] = process.env.NEXT_PUBLIC_SESSION_SECRET;
+      }
       const response = await fetch("/api/session", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
+        body: JSON.stringify({ voice: selectedVoice }),
       });
       if (!response.ok) {
         throw new Error(`Failed to get ephemeral token: ${response.status}`);
@@ -401,7 +481,7 @@ export default function useWebRTCAudioSession(
       if (audioIndicatorRef.current) {
         audioIndicatorRef.current.classList.toggle("active", average > 30);
       }
-      requestAnimationFrame(updateIndicator);
+      animationFrameRef.current = requestAnimationFrame(updateIndicator);
     };
     updateIndicator();
     audioContextRef.current = audioContext;
@@ -427,13 +507,13 @@ export default function useWebRTCAudioSession(
    * Guarded to prevent parallel sessions using isStartingRef.
    */
   async function startSession() {
-    if (isSessionActive || isStartingRef.current) {
+    if (isSessionActiveRef.current || isStartingRef.current) {
       console.warn("Session already active or starting.");
       return;
     }
     isStartingRef.current = true;
     try {
-      if (isSessionActive) {
+      if (isSessionActiveRef.current) {
         stopSession();
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
@@ -443,7 +523,7 @@ export default function useWebRTCAudioSession(
       audioStreamRef.current = stream;
       setupAudioVisualization(stream);
       setStatus("Fetching ephemeral token...");
-      const ephemeralToken = await getEphemeralToken();
+      const ephemeralToken = await getEphemeralToken(voice);
       setStatus("Establishing connection...");
       const pc = new RTCPeerConnection();
       peerConnectionRef.current = pc;
@@ -459,30 +539,39 @@ export default function useWebRTCAudioSession(
       }
       const dummyStream = dummyVideo.captureStream(1); // 1 fps
       const videoTrack = dummyStream.getVideoTracks()[0];
+      dummyVideoTrackRef.current = videoTrack;
 
-      // Add transceivers for both audio and video
-      pc.addTransceiver("audio", { direction: "sendrecv" });
-      pc.addTransceiver("video", {
-        direction: "sendrecv",
-        streams: [dummyStream],
-      });
+      const audioTrack = stream
+        .getTracks()
+        .find((track) => track.kind === "audio");
+      if (!audioTrack) {
+        throw new Error("No audio track available from microphone");
+      }
 
-      // Add tracks
-      pc.addTrack(stream.getTracks()[0]); // Audio track
-      pc.addTrack(videoTrack); // Video track
+      pc.addTransceiver(audioTrack, { direction: "sendrecv" });
+      pc.addTransceiver(videoTrack, { direction: "sendrecv" });
 
       // Create hidden audio element for inbound TTS
       const audioEl = document.createElement("audio");
       audioEl.autoplay = true;
+      audioElementRef.current = audioEl;
       pc.ontrack = (event) => {
+        if (event.track.kind !== "audio") return;
         audioEl.srcObject = event.streams[0];
-        const audioCtx = new (window.AudioContext ||
+        if (inboundAudioContextRef.current) {
+          inboundAudioContextRef.current.close().catch(() => undefined);
+        }
+        const inboundAudioCtx = new (window.AudioContext ||
           window.webkitAudioContext)();
-        const src = audioCtx.createMediaStreamSource(event.streams[0]);
-        const inboundAnalyzer = audioCtx.createAnalyser();
+        inboundAudioContextRef.current = inboundAudioCtx;
+        const src = inboundAudioCtx.createMediaStreamSource(event.streams[0]);
+        const inboundAnalyzer = inboundAudioCtx.createAnalyser();
         inboundAnalyzer.fftSize = 256;
         src.connect(inboundAnalyzer);
         analyserRef.current = inboundAnalyzer;
+        if (volumeIntervalRef.current) {
+          clearInterval(volumeIntervalRef.current);
+        }
         volumeIntervalRef.current = window.setInterval(() => {
           setCurrentVolume(getVolume());
         }, 100);
@@ -491,9 +580,24 @@ export default function useWebRTCAudioSession(
       const dataChannel = pc.createDataChannel("response");
       dataChannelRef.current = dataChannel;
       dataChannel.onopen = () => {
-        configureDataChannel(dataChannel);
+        sendSessionUpdate();
       };
       dataChannel.onmessage = handleDataChannelMessage;
+      dataChannel.onclose = () => {
+        if (!isStoppingRef.current) {
+          void restartSession("data channel closed");
+        }
+      };
+      dataChannel.onerror = () => {
+        if (!isStoppingRef.current) {
+          void restartSession("data channel error");
+        }
+      };
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === "failed") {
+          void restartSession("connection failed");
+        }
+      };
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -507,14 +611,21 @@ export default function useWebRTCAudioSession(
           "Content-Type": "application/sdp",
         },
       });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `Realtime API error ${response.status}: ${errorText || "Unknown"}`
+        );
+      }
       const answerSdp = await response.text();
       await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+      isSessionActiveRef.current = true;
       setIsSessionActive(true);
       setStatus("Session established successfully!");
     } catch (err) {
       console.error("startSession error:", err);
       setStatus(`Error: ${err}`);
-      stopSession();
+      stopSession({ preserveStatus: true });
     } finally {
       isStartingRef.current = false;
     }
@@ -523,7 +634,8 @@ export default function useWebRTCAudioSession(
   /**
    * Stop the session & cleanup.
    */
-  function stopSession() {
+  function stopSession(options: StopSessionOptions = {}) {
+    isStoppingRef.current = true;
     if (dataChannelRef.current) {
       dataChannelRef.current.close();
       dataChannelRef.current = null;
@@ -536,9 +648,21 @@ export default function useWebRTCAudioSession(
       audioContextRef.current.close();
       audioContextRef.current = null;
     }
+    if (inboundAudioContextRef.current) {
+      inboundAudioContextRef.current.close().catch(() => undefined);
+      inboundAudioContextRef.current = null;
+    }
     if (audioStreamRef.current) {
       audioStreamRef.current.getTracks().forEach((track) => track.stop());
       audioStreamRef.current = null;
+    }
+    if (dummyVideoTrackRef.current) {
+      dummyVideoTrackRef.current.stop();
+      dummyVideoTrackRef.current = null;
+    }
+    if (audioElementRef.current) {
+      audioElementRef.current.srcObject = null;
+      audioElementRef.current = null;
     }
     if (audioIndicatorRef.current) {
       audioIndicatorRef.current.classList.remove("active");
@@ -547,14 +671,22 @@ export default function useWebRTCAudioSession(
       clearInterval(volumeIntervalRef.current);
       volumeIntervalRef.current = null;
     }
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
     analyserRef.current = null;
     ephemeralUserMessageIdRef.current = null;
-    sessionUpdateSentRef.current = false;
+    lastSessionUpdateRef.current = null;
     setCurrentVolume(0);
+    isSessionActiveRef.current = false;
     setIsSessionActive(false);
-    setStatus("Session stopped");
+    if (!options.preserveStatus) {
+      setStatus("Session stopped");
+    }
     setMsgs([]);
     setConversation([]);
+    isStoppingRef.current = false;
   }
 
   /**
