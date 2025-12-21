@@ -52,7 +52,8 @@ class MCPService {
     if (!this.client) {
       throw new Error("MCP Client not initialized");
     }
-    return this.client.listTools();
+    const result = await this.client.listTools();
+    return result.tools; // Return just the tools array
   }
 
   async callSpotifyTool(toolName: string, params: Record<string, any> = {}) {

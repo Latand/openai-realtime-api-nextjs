@@ -68,6 +68,8 @@ function useToolRegistration(
       openTerminal: "openTerminal",
       openFiles: "openFiles",
       readClipboard: "readClipboard",
+      askClaude: "askClaude",
+      getClaudeOutput: "getClaudeOutput",
     };
 
     // Register regular tools
@@ -121,10 +123,10 @@ function useWakeWordConfig(
   const keywords = useMemo(
     () => [
       {
-        label: "Hi Jarvis",
-        publicPath: "/models/Hi-Jarvis.ppn",
+        label: "Hi Celestial",
+        publicPath: "/models/Hi-Celestial.ppn",
         sensitivity: 0.6,
-        customWritePath: "Hi-Jarvis.ppn",
+        customWritePath: "Hi-Celestial.ppn",
         forceWrite: true,
       },
     ],
@@ -179,6 +181,9 @@ function AppContent() {
     toolDefinitions: mcpToolDefinitions,
   } = useMCPFunctions();
 
+  // Store pending Claude requests: requestId -> callId
+  const pendingClaudeRequests = useRef<Map<string, string>>(new Map());
+
   // Initialize WebRTC session with all tools
   const {
     status,
@@ -186,6 +191,8 @@ function AppContent() {
     startSession,
     stopSession,
     registerFunction,
+    sendTextMessage,
+    sendFunctionOutput,
   } = useWebRTCAudioSession(voice, tools, mcpDefinitions);
 
   const prevSessionActiveRef = useRef(isSessionActive);
@@ -198,6 +205,43 @@ function AppContent() {
       setMcpDefinitions(mcpToolDefinitions as Tool[]);
     }
   }, [mcpFunctions, mcpToolDefinitions]);
+
+  // Listen for Claude CLI responses
+  useEffect(() => {
+    if (!window.electron?.onClaudeResponse) return;
+
+    const unsubscribeResponse = window.electron.onClaudeResponse((data) => {
+      debug("Claude response received:", data.requestId);
+      playSound("/sounds/session-start.mp3");
+
+      // Format the response for the AI to speak naturally
+      const prompt = `[SYSTEM: Claude CLI has finished processing and returned the following response. Please summarize this information concisely and speak it to the user in a natural, conversational way. Here is Claude's response:]\n\n${data.response}`;
+
+      // If session is active, inject the response
+      if (isSessionActive) {
+        sendTextMessage(prompt);
+      } else {
+        // Start session and inject response after a delay
+        startSession();
+        setTimeout(() => {
+          sendTextMessage(prompt);
+        }, 2500);
+      }
+    });
+
+    const unsubscribeError = window.electron.onClaudeError?.((data) => {
+      debug("Claude error:", data.error);
+      playSound("/sounds/session-end.mp3");
+      if (isSessionActive) {
+        sendTextMessage(`[SYSTEM: Claude CLI encountered an error: ${data.error}. Please inform the user about this error.]`);
+      }
+    });
+
+    return () => {
+      unsubscribeResponse?.();
+      unsubscribeError?.();
+    };
+  }, [isSessionActive, sendTextMessage, startSession]);
 
   const justReinitTimeoutRef = useRef<number | null>(null);
 
@@ -331,11 +375,12 @@ function AppContent() {
     handleStartSession,
   ]);
   // Register tool functions
+  // Pass stopSession (not handleStopSession) so AI-initiated stops don't disable wake word
   useToolRegistration(
     registerFunction,
     toolsFunctions as Record<string, ToolHandler>,
     mcpFunctions as Record<string, ToolHandler>,
-    handleStopSession
+    stopSession
   );
   // Handle sound effects
   useSoundEffects(isSessionActive, justReinitialized);
@@ -353,7 +398,7 @@ function AppContent() {
           onClick={onButtonClick}
         />
       </div>
-      {wakeWordEnabled && wakeError && (
+      {wakeWordEnabled && wakeError && !wakeListening && !wakeReady && (
         <p className="text-red-500 mt-2">
           Wake Word Error: {wakeError.message}
         </p>
@@ -361,11 +406,11 @@ function AppContent() {
       <p className="mt-2">
         {!wakeWordEnabled
           ? "Wake word disabled"
-          : wakeReady
-          ? wakeListening
+          : wakeListening
             ? "Listening for wake word..."
-            : "Not listening"
-          : "Initializing wake word..."}
+            : wakeReady
+              ? "Ready (not listening)"
+              : "Initializing wake word..."}
       </p>
     </main>
   );

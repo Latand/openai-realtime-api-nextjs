@@ -240,6 +240,95 @@ export const useToolsFunctions = () => {
     }
   };
 
+  const askClaude = async ({ query }: { query: string }) => {
+    try {
+      if (!query) {
+        return { success: false, message: "No query provided" };
+      }
+
+      toast.info("Asking Claude...", {
+        description: query.substring(0, 50) + (query.length > 50 ? "..." : ""),
+      });
+
+      if (window.electron?.system?.askClaude) {
+        const result = await window.electron.system.askClaude(query);
+        if (result.success) {
+          if (result.pending) {
+            // Request is processing in background
+            toast.info("Processing...", {
+              description: `Request ${result.requestId} started (PID: ${result.pid})`,
+            });
+            return {
+              success: true,
+              pending: true,
+              requestId: result.requestId,
+              pid: result.pid,
+              message: `Claude is processing your request. Request ID: ${result.requestId}, Process ID: ${result.pid}. You can call getClaudeOutput with requestId "${result.requestId}" to check the status and see the output progress.`,
+            };
+          } else if (result.response) {
+            toast.success("Claude responded", {
+              description: "Response received",
+            });
+            return {
+              success: true,
+              message: `Claude's response: ${result.response}`,
+            };
+          }
+        } else {
+          throw new Error(result.error || "Failed to get response from Claude");
+        }
+      }
+      return {
+        success: false,
+        message: "Claude CLI not available in web mode",
+      };
+    } catch (error) {
+      console.error("Failed to ask Claude:", error);
+      toast.error("Failed to ask Claude", {
+        description: String(error),
+      });
+      return {
+        success: false,
+        message: `Failed to ask Claude: ${error}`,
+      };
+    }
+  };
+
+  const getClaudeOutput = async ({ requestId }: { requestId: string }) => {
+    try {
+      if (!requestId) {
+        return { success: false, message: "No requestId provided" };
+      }
+
+      if (window.electron?.system?.getClaudeOutput) {
+        const result = await window.electron.system.getClaudeOutput(requestId);
+        if (result.success) {
+          if (result.status === 'done') {
+            return {
+              success: true,
+              message: `Claude finished! Response: ${result.response}`,
+            };
+          } else if (result.status === 'error') {
+            return {
+              success: false,
+              message: `Claude error: ${result.error}`,
+            };
+          } else {
+            // Still pending
+            return {
+              success: true,
+              message: `Still processing (${result.elapsedSeconds}s elapsed, PID: ${result.pid}). Output so far: ${result.stdoutLength} bytes. Latest: ${result.stdoutTail || 'no output yet'}`,
+            };
+          }
+        }
+        return { success: false, message: result.error || "Failed to get output" };
+      }
+      return { success: false, message: "Not available in web mode" };
+    } catch (error) {
+      return { success: false, message: `Error: ${error}` };
+    }
+  };
+
   return {
     timeFunction,
     launchWebsite,
@@ -248,6 +337,8 @@ export const useToolsFunctions = () => {
     scrapeWebsite,
     stopSession,
     adjustSystemVolume,
+    askClaude,
+    getClaudeOutput,
   };
 };
 

@@ -74,6 +74,32 @@ const toolDefinitions = {
       properties: {},
     },
   },
+  askClaude: {
+    description:
+      "Asks Claude AI a question and returns the response. Use this for complex queries, coding help, research, or any question you cannot answer directly. Returns a requestId and PID that can be used with getClaudeOutput to check progress.",
+    parameters: {
+      type: "object" as const,
+      properties: {
+        query: {
+          type: "string",
+          description: "The question or prompt to send to Claude",
+        },
+      },
+    },
+  },
+  getClaudeOutput: {
+    description:
+      "Check the status and output of a pending Claude request. Use this to see if Claude has finished processing and to read the current output.",
+    parameters: {
+      type: "object" as const,
+      properties: {
+        requestId: {
+          type: "string",
+          description: "The request ID returned by askClaude",
+        },
+      },
+    },
+  },
 } as const;
 
 const tools: Tool[] = Object.entries(toolDefinitions).map(([name, config]) => ({

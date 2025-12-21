@@ -3,6 +3,12 @@ export {};
 declare global {
   interface Window {
     electron?: {
+      onClaudeResponse: (
+        callback: (data: { requestId: string; response: string }) => void
+      ) => () => void;
+      onClaudeError: (
+        callback: (data: { requestId: string; error: string }) => void
+      ) => () => void;
       clipboard: {
         write: (
           text: string
@@ -23,6 +29,22 @@ declare global {
         adjustSystemVolume: (
           percentage: number
         ) => Promise<{ success: boolean; error?: string }>;
+        askClaude: (
+          query: string
+        ) => Promise<{ success: boolean; response?: string; error?: string; pending?: boolean; requestId?: string; pid?: number; message?: string }>;
+        getClaudeOutput: (
+          requestId: string
+        ) => Promise<{
+          success: boolean;
+          status?: 'pending' | 'done' | 'error';
+          pid?: number;
+          elapsedSeconds?: number;
+          stdoutLength?: number;
+          stderrLength?: number;
+          stdoutTail?: string;
+          response?: string;
+          error?: string;
+        }>;
       };
       window: {
         toggleDevTools: () => Promise<void>;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { usePorcupine } from "@picovoice/porcupine-react";
 import { PorcupineKeyword } from "@picovoice/porcupine-web";
 
@@ -17,170 +17,106 @@ export interface WakeWordConfig {
 
 export function useWakeWord(config: WakeWordConfig) {
   const [isReady, setIsReady] = useState(false);
-  const [detected, setDetected] = useState<boolean>(false);
-  const isInitializingRef = useRef(false);
-  const isInitializedRef = useRef(false);
+  const [detected, setDetected] = useState(false);
+  const initCalledRef = useRef(false);
 
   const {
     init,
+    start,
+    stop,
     release,
-    start: startPorcupine,
-    stop: stopPorcupine,
     isListening,
+    isLoaded,
     error,
     keywordDetection,
   } = usePorcupine();
 
-  // Initial initialization on mount
+  // Initialize on first user interaction
   useEffect(() => {
-    let cancelled = false;
-    const initializeEngine = async () => {
+    if (!config.accessKey || !config.enabled) return;
+
+    const handleInteraction = async () => {
+      if (initCalledRef.current) return;
+      initCalledRef.current = true;
+
+      console.log("[useWakeWord] User interacted, initializing Porcupine...");
+
       try {
-        if (!config.enabled) {
-          setIsReady(false);
-          isInitializedRef.current = false;
-          return;
-        }
-        if (!config.accessKey || config.keywords.length === 0) {
-          setIsReady(false);
-          isInitializedRef.current = false;
-          return;
-        }
-        if (isInitializingRef.current) {
-          return;
-        }
-        isInitializingRef.current = true;
         await init(config.accessKey, config.keywords, config.porcupineModel);
-        if (cancelled) return;
-        await startPorcupine();
-        if (!cancelled) {
-          setIsReady(true);
-          isInitializedRef.current = true;
-        }
+        console.log("[useWakeWord] init() done, isLoaded should be true now");
       } catch (err) {
-        console.error("Error initializing Porcupine:", err);
-        if (!cancelled) {
-          setIsReady(false);
-        }
-        isInitializedRef.current = false;
-      } finally {
-        isInitializingRef.current = false;
+        console.error("[useWakeWord] init failed:", err);
+        initCalledRef.current = false;
       }
     };
 
-    initializeEngine();
+    window.addEventListener("click", handleInteraction, { once: true });
+    return () => window.removeEventListener("click", handleInteraction);
+  }, [config.accessKey, config.enabled, config.keywords, config.porcupineModel, init]);
 
-    // Cleanup on unmount
-    return () => {
-      cancelled = true;
-      if (isInitializedRef.current) {
-        try {
-          stopPorcupine();
-        } catch (err) {
-          console.error("Error stopping Porcupine during cleanup:", err);
-        }
-      }
-      isInitializedRef.current = false;
-      release();
-    };
-  }, [
-    config.enabled,
-    config.accessKey,
-    config.keywords,
-    config.porcupineModel,
-    init,
-    startPorcupine,
-    release,
-  ]);
-
-  // Function to completely reinitialize the engine
-  const reinitializeEngine = async () => {
-    try {
-      if (!config.enabled) {
-        setIsReady(false);
-        isInitializedRef.current = false;
-        return;
-      }
-      if (!config.accessKey || config.keywords.length === 0) {
-        setIsReady(false);
-        isInitializedRef.current = false;
-        return;
-      }
-      if (isInitializingRef.current) {
-        return;
-      }
-      isInitializingRef.current = true;
-      // First release current resources
-      if (isInitializedRef.current) {
-        await stopPorcupine();
-      }
-      isInitializedRef.current = false;
-      // Then initialize and start detection again
-      await init(config.accessKey, config.keywords, config.porcupineModel);
-      await startPorcupine();
-      setIsReady(true);
-      isInitializedRef.current = true;
-      console.log("[useWakeWord] Porcupine reinitialized successfully.");
-    } catch (err) {
-      console.error("Error reinitializing Porcupine:", err);
-      isInitializedRef.current = false;
-    } finally {
-      isInitializingRef.current = false;
-    }
-  };
-
-  const startWakeWord = async () => {
-    if (!config.enabled || !isInitializedRef.current) {
-      return;
-    }
-    try {
-      await startPorcupine();
-    } catch (err) {
-      console.error("Error starting Porcupine:", err);
-    }
-  };
-
-  const stopWakeWord = async () => {
-    if (!config.enabled || !isInitializedRef.current) {
-      return;
-    }
-    try {
-      await stopPorcupine();
-    } catch (err) {
-      console.error("Error stopping Porcupine:", err);
-    }
-  };
-
-  // Call onWakeWord on a fresh detection (transition from false to true).
+  // Start listening when loaded and enabled
   useEffect(() => {
-    const isDetected = Boolean(keywordDetection);
-    if (!isListening) {
-      setDetected(false);
+    if (!isLoaded) {
+      console.log("[useWakeWord] Not loaded yet, isLoaded:", isLoaded);
       return;
     }
-    console.log(`Keyword detection: ${JSON.stringify(keywordDetection)}`);
-    if (isDetected) {
-      setDetected(true);
-      if (config.onWakeWord) {
-        console.log(
-          "[useWakeWord] Fresh wake word detected. Calling onWakeWord callback."
-        );
-        config.onWakeWord();
-      }
-      const timeout = window.setTimeout(() => setDetected(false), 800);
-      return () => window.clearTimeout(timeout);
+
+    const shouldListen = config.enabled && !config.sessionActive;
+    console.log("[useWakeWord] isLoaded:", isLoaded, "shouldListen:", shouldListen, "isListening:", isListening);
+
+    if (shouldListen && !isListening) {
+      console.log("[useWakeWord] Starting...");
+      start().then(() => {
+        console.log("[useWakeWord] start() resolved");
+        setIsReady(true);
+      }).catch(err => {
+        console.error("[useWakeWord] start() error:", err);
+      });
+    } else if (!shouldListen && isListening) {
+      console.log("[useWakeWord] Stopping...");
+      stop().then(() => {
+        console.log("[useWakeWord] stop() resolved");
+        setIsReady(false);
+      }).catch(err => {
+        console.error("[useWakeWord] stop() error:", err);
+      });
     }
-    setDetected(false);
-  }, [keywordDetection, isListening, config.onWakeWord]);
+  }, [isLoaded, config.enabled, config.sessionActive, isListening, start, stop]);
+
+  // Handle keyword detection with debounce
+  const lastDetectionRef = useRef<number>(0);
+  useEffect(() => {
+    if (keywordDetection) {
+      const now = Date.now();
+      // Ignore detections within 2 seconds of last one
+      if (now - lastDetectionRef.current < 2000) {
+        console.log("[useWakeWord] Ignoring rapid detection");
+        return;
+      }
+      lastDetectionRef.current = now;
+
+      console.log("[useWakeWord] Keyword detected:", keywordDetection);
+      setDetected(true);
+      config.onWakeWord?.();
+      const timer = setTimeout(() => setDetected(false), 800);
+      return () => clearTimeout(timer);
+    }
+  }, [keywordDetection, config.onWakeWord]);
+
+  // Debug state
+  useEffect(() => {
+    console.log("[useWakeWord] State:", { isLoaded, isListening, isReady, error: error?.message });
+  }, [isLoaded, isListening, isReady, error]);
 
   return {
-    startPorcupine: startWakeWord,
-    stopPorcupine: stopWakeWord,
+    startPorcupine: start,
+    stopPorcupine: stop,
     isReady,
     isListening,
     error,
-    reinitializeEngine,
-    release,
+    reinitializeEngine: async () => {
+      initCalledRef.current = false;
+    },
     detected,
   };
 }

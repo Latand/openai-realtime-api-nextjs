@@ -43,6 +43,7 @@ interface UseWebRTCAudioSessionReturn {
   currentVolume: number;
   conversation: Conversation[];
   sendTextMessage: (text: string) => void;
+  sendFunctionOutput: (callId: string, output: any) => boolean;
 }
 /**
  * Normalizes the parameters schema:
@@ -602,7 +603,7 @@ export default function useWebRTCAudioSession(
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       const baseUrl = "https://api.openai.com/v1/realtime";
-      const model = "gpt-4o-mini-realtime-preview-2024-12-17";
+      const model = "gpt-realtime";
       const response = await fetch(`${baseUrl}?model=${model}&voice=${voice}`, {
         method: "POST",
         body: offer.sdp,
@@ -701,6 +702,30 @@ export default function useWebRTCAudioSession(
   }
 
   /**
+   * Send a function call output (for async function responses like Claude CLI)
+   */
+  function sendFunctionOutput(callId: string, output: any) {
+    if (
+      !dataChannelRef.current ||
+      dataChannelRef.current.readyState !== "open"
+    ) {
+      console.error("Data channel not ready for function output");
+      return false;
+    }
+    const response = {
+      type: "conversation.item.create",
+      item: {
+        type: "function_call_output",
+        call_id: callId,
+        output: JSON.stringify(output),
+      },
+    };
+    dataChannelRef.current.send(JSON.stringify(response));
+    dataChannelRef.current.send(JSON.stringify({ type: "response.create" }));
+    return true;
+  }
+
+  /**
    * Send a text message through the data channel.
    */
   function sendTextMessage(text: string) {
@@ -752,5 +777,6 @@ export default function useWebRTCAudioSession(
     currentVolume,
     conversation,
     sendTextMessage,
+    sendFunctionOutput,
   };
 }

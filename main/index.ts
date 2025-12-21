@@ -1,3 +1,10 @@
+import * as dotenv from "dotenv";
+import * as path from "path";
+
+// Load .env.local before anything else
+dotenv.config({ path: path.join(__dirname, "../.env.local") });
+dotenv.config({ path: path.join(__dirname, "../.env") });
+
 import {
   app,
   BrowserWindow,
@@ -5,14 +12,14 @@ import {
   clipboard,
   screen,
 } from "electron";
-import * as path from "path";
 import next from "next";
 import { createServer, Server } from "http";
-import { execFile, spawn } from "child_process";
+import { execFile, spawn, exec } from "child_process";
 import { promisify } from "util";
 import { mcpService } from "./mcp-service";
 
 const execFileAsync = promisify(execFile);
+const execAsync = promisify(exec);
 const isDevelopment = !app.isPackaged;
 
 let mainWindow: BrowserWindow | null = null;
@@ -298,6 +305,130 @@ ipcMain.handle("system:openSpotify", () => {
       }
     }, 1000);
   });
+});
+
+// Store pending Claude responses with output buffer
+interface ClaudeRequest {
+  status: 'pending' | 'done' | 'error';
+  response?: string;
+  error?: string;
+  pid?: number;
+  stdout: string;
+  stderr: string;
+  startTime: number;
+}
+const pendingClaudeResponses: Map<string, ClaudeRequest> = new Map();
+
+ipcMain.handle("system:askClaude", async (_, query: string) => {
+  try {
+    if (!query || typeof query !== "string") {
+      return { success: false, error: "Invalid query" };
+    }
+
+    const requestId = Date.now().toString();
+    console.log("[AskClaude] Starting query:", query.substring(0, 100), "ID:", requestId);
+
+    // Store pending status with buffers
+    pendingClaudeResponses.set(requestId, {
+      status: 'pending',
+      stdout: '',
+      stderr: '',
+      startTime: Date.now()
+    });
+
+    // Run Claude using spawn for real-time output
+    const claudePath = `${process.env.HOME}/.bun/bin/claude`;
+    console.log("[AskClaude] Running:", claudePath, "Query length:", query.length);
+
+    const child = spawn(claudePath, [
+      "--dangerously-skip-permissions",
+      "--output-format", "text",
+      "-p",
+      query
+    ], {
+      env: { ...process.env, TERM: 'dumb', NO_COLOR: '1' },
+      stdio: ['ignore', 'pipe', 'pipe'] // ignore stdin, pipe stdout/stderr
+    });
+
+    const request = pendingClaudeResponses.get(requestId)!;
+    request.pid = child.pid;
+
+    console.log("[AskClaude] Child PID:", child.pid);
+
+    child.stdout.on('data', (data) => {
+      const chunk = data.toString();
+      request.stdout += chunk;
+      console.log("[AskClaude] STDOUT:", chunk.substring(0, 100));
+    });
+
+    child.stderr.on('data', (data) => {
+      const chunk = data.toString();
+      request.stderr += chunk;
+      console.log("[AskClaude] STDERR:", chunk.substring(0, 200));
+    });
+
+    child.on('close', (code) => {
+      console.log("[AskClaude] Exited code:", code, "stdout:", request.stdout.length, "stderr:", request.stderr.length);
+      clearInterval(checkInterval);
+      if (code === 0 && request.stdout) {
+        request.status = 'done';
+        request.response = request.stdout.trim();
+        mainWindow?.webContents.send("claude:response", { requestId, response: request.stdout.trim() });
+      } else {
+        request.status = 'error';
+        request.error = request.stderr || `Exit code ${code}`;
+        mainWindow?.webContents.send("claude:error", { requestId, error: request.error });
+      }
+    });
+
+    child.on('error', (err) => {
+      console.error("[AskClaude] Spawn error:", err.message);
+      clearInterval(checkInterval);
+      request.status = 'error';
+      request.error = err.message;
+      mainWindow?.webContents.send("claude:error", { requestId, error: err.message });
+    });
+
+    // Check status every 10 seconds
+    const checkInterval = setInterval(() => {
+      console.log("[AskClaude] PID:", child.pid, "running, stdout:", request.stdout.length, "stderr:", request.stderr.length);
+    }, 10000);
+
+    // Return immediately with the request ID and PID
+    return {
+      success: true,
+      pending: true,
+      requestId,
+      pid: child.pid,
+      message: `Processing your request (ID: ${requestId}, PID: ${child.pid}). Use getClaudeOutput to check progress.`
+    };
+  } catch (error) {
+    console.error("[AskClaude] Error:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+});
+
+ipcMain.handle("system:getClaudeOutput", async (_, requestId: string) => {
+  const request = pendingClaudeResponses.get(requestId);
+  if (!request) {
+    return { success: false, error: "Request not found" };
+  }
+  const elapsedSec = Math.floor((Date.now() - request.startTime) / 1000);
+  return {
+    success: true,
+    status: request.status,
+    pid: request.pid,
+    elapsedSeconds: elapsedSec,
+    stdoutLength: request.stdout.length,
+    stderrLength: request.stderr.length,
+    // Return last 500 chars of stdout for progress
+    stdoutTail: request.stdout.slice(-500),
+    response: request.response,
+    error: request.error
+  };
 });
 
 ipcMain.handle("system:adjustVolume", async (_, percentage: number) => {
