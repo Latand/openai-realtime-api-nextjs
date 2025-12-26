@@ -10,7 +10,7 @@ const toolDefinitions = {
     },
   },
   stopSession: {
-    description: "Stops the current voice session",
+    description: "Stops the current voice session. IMPORTANT: Before calling this, you MUST first call saveConversationSummary to preserve a summary of what was discussed for future sessions.",
     parameters: {
       type: "object" as const,
       properties: {},
@@ -74,6 +74,18 @@ const toolDefinitions = {
       properties: {},
     },
   },
+  copyToClipboard: {
+    description: "Copies text to the system clipboard without pasting it",
+    parameters: {
+      type: "object" as const,
+      properties: {
+        text: {
+          type: "string",
+          description: "The text to copy to clipboard",
+        },
+      },
+    },
+  },
   askClaude: {
     description:
       "Asks Claude AI a question and returns the response. Use this for complex queries, coding help, research, or any question you cannot answer directly. Returns a requestId and PID that can be used with getClaudeOutput to check progress.",
@@ -96,6 +108,19 @@ const toolDefinitions = {
         requestId: {
           type: "string",
           description: "The request ID returned by askClaude",
+        },
+      },
+    },
+  },
+  saveConversationSummary: {
+    description:
+      "Saves a summary of the current conversation for future context. Call this before ending a session to preserve memory of what was discussed. The summary should be concise (2-3 sentences) covering key topics, decisions, and any pending tasks.",
+    parameters: {
+      type: "object" as const,
+      properties: {
+        summary: {
+          type: "string",
+          description: "A concise summary of the conversation (max 500 characters)",
         },
       },
     },

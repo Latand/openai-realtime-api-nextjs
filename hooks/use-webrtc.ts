@@ -44,6 +44,7 @@ interface UseWebRTCAudioSessionReturn {
   conversation: Conversation[];
   sendTextMessage: (text: string) => void;
   sendFunctionOutput: (callId: string, output: any) => boolean;
+  clearConversation: () => void;
 }
 /**
  * Normalizes the parameters schema:
@@ -107,7 +108,10 @@ function normalizeParameters(params: any): {
 export default function useWebRTCAudioSession(
   voice: string,
   toolDefinitions?: Tool[],
-  mcpDefinitions?: Tool[]
+  mcpDefinitions?: Tool[],
+  previousConversations?: string,
+  selectedMicrophoneId?: string,
+  customSystemPrompt?: string
 ): UseWebRTCAudioSessionReturn {
   const { t, locale } = useTranslations();
   // Connection/session states
@@ -195,6 +199,14 @@ export default function useWebRTCAudioSession(
   const sendSessionUpdate = useCallback(() => {
     const dataChannel = dataChannelRef.current;
     if (!dataChannel || dataChannel.readyState !== "open") return;
+
+    // Use custom system prompt if provided, otherwise use default from translations
+    let instructions = customSystemPrompt || t("languagePrompt");
+    if (previousConversations) {
+      console.log("[Memory] Injecting previous conversations into instructions, length:", previousConversations.length);
+      instructions += previousConversations;
+    }
+
     const sessionUpdate = {
       type: "session.update",
       session: {
@@ -203,7 +215,13 @@ export default function useWebRTCAudioSession(
         input_audio_transcription: {
           model: "whisper-1",
         },
-        instructions: t("languagePrompt"),
+        turn_detection: {
+          type: "server_vad",
+          threshold: 0.9, // Higher = less sensitive (0.0-1.0), default is ~0.5
+          prefix_padding_ms: 500,
+          silence_duration_ms: 800,
+        },
+        instructions,
       },
     };
     const payload = JSON.stringify(sessionUpdate);
@@ -212,7 +230,7 @@ export default function useWebRTCAudioSession(
     console.log("Session update sent:", sessionUpdate);
     console.log("Setting locale: " + t("language") + " : " + locale);
     lastSessionUpdateRef.current = payload;
-  }, [allTools, locale, t]);
+  }, [allTools, locale, t, previousConversations, customSystemPrompt]);
 
   useEffect(() => {
     if (!isSessionActiveRef.current) return;
@@ -362,10 +380,38 @@ export default function useWebRTCAudioSession(
           console.log("response.function_call_arguments.done", msg);
           const fn = functionRegistry.current[msg.name.toLowerCase()];
           let parsedArgs: Record<string, any> = {};
+          const toolCallId = uuidv4();
+
+          // Skip logging for noisy polling tools
+          const silentTools = ["getclaudeoutput", "getClaudeOutput"];
+          const shouldLog = !silentTools.includes(msg.name.toLowerCase()) && !silentTools.includes(msg.name);
+
+          // Add tool call to conversation (pending state)
+          const toolCallEntry: Conversation = {
+            id: toolCallId,
+            role: "tool",
+            text: `Calling ${msg.name}...`,
+            timestamp: new Date().toISOString(),
+            isFinal: false,
+            status: "processing",
+            toolName: msg.name,
+            toolArgs: {},
+          };
+
           if (msg.arguments) {
             try {
               parsedArgs = JSON.parse(msg.arguments);
+              toolCallEntry.toolArgs = parsedArgs;
             } catch (error) {
+              // Update tool call with parse error
+              toolCallEntry.text = `${msg.name} failed`;
+              toolCallEntry.isFinal = true;
+              toolCallEntry.status = "final";
+              toolCallEntry.toolError = `Failed to parse arguments: ${error}`;
+              if (shouldLog) {
+                setConversation((prev) => [...prev, toolCallEntry]);
+              }
+
               const errorResponse = {
                 type: "conversation.item.create",
                 item: {
@@ -383,9 +429,35 @@ export default function useWebRTCAudioSession(
               break;
             }
           }
+
+          // Add pending tool call to conversation (only if not silent)
+          if (shouldLog) {
+            setConversation((prev) => [...prev, toolCallEntry]);
+          }
+
+          // Helper to update tool call result
+          const updateToolCall = (result?: unknown, error?: string) => {
+            if (!shouldLog) return;
+            setConversation((prev) =>
+              prev.map((item) =>
+                item.id === toolCallId
+                  ? {
+                      ...item,
+                      text: error ? `${msg.name} failed` : `${msg.name} completed`,
+                      isFinal: true,
+                      status: "final" as const,
+                      toolResult: result,
+                      toolError: error,
+                    }
+                  : item
+              )
+            );
+          };
+
           if (fn) {
             try {
               const result = await fn(parsedArgs);
+              updateToolCall(result);
               const response = {
                 type: "conversation.item.create",
                 item: {
@@ -396,6 +468,7 @@ export default function useWebRTCAudioSession(
               };
               dataChannelRef.current?.send(JSON.stringify(response));
             } catch (error) {
+              updateToolCall(undefined, `Tool execution failed: ${error}`);
               const errorResponse = {
                 type: "conversation.item.create",
                 item: {
@@ -409,6 +482,7 @@ export default function useWebRTCAudioSession(
               dataChannelRef.current?.send(JSON.stringify(errorResponse));
             }
           } else {
+            updateToolCall(undefined, `Function '${msg.name}' not found`);
             const errorResponse = {
               type: "conversation.item.create",
               item: {
@@ -520,7 +594,17 @@ export default function useWebRTCAudioSession(
       }
       setStatus("Starting session...");
       setStatus("Requesting microphone access...");
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const audioConstraints: MediaTrackConstraints = {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      };
+      if (selectedMicrophoneId) {
+        audioConstraints.deviceId = { exact: selectedMicrophoneId };
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraints,
+      });
       audioStreamRef.current = stream;
       setupAudioVisualization(stream);
       setStatus("Fetching ephemeral token...");
@@ -686,8 +770,11 @@ export default function useWebRTCAudioSession(
       setStatus("Session stopped");
     }
     setMsgs([]);
-    setConversation([]);
-    isStoppingRef.current = false;
+    // Keep conversation history - don't clear on session end
+    // Delay resetting isStoppingRef to allow async close events to complete
+    setTimeout(() => {
+      isStoppingRef.current = false;
+    }, 500);
   }
 
   /**
@@ -723,6 +810,13 @@ export default function useWebRTCAudioSession(
     dataChannelRef.current.send(JSON.stringify(response));
     dataChannelRef.current.send(JSON.stringify({ type: "response.create" }));
     return true;
+  }
+
+  /**
+   * Clear the conversation history.
+   */
+  function clearConversation() {
+    setConversation([]);
   }
 
   /**
@@ -778,5 +872,6 @@ export default function useWebRTCAudioSession(
     conversation,
     sendTextMessage,
     sendFunctionOutput,
+    clearConversation,
   };
 }

@@ -5,6 +5,8 @@ import { useTranslations } from "@/components/translations-context";
 import { mcpClient } from "@/lib/mcp-client";
 import { useState, useEffect } from "react";
 import type { Tool } from "@/hooks/use-webrtc";
+import { playSound } from "@/lib/tools";
+import { saveCompact, ConversationCompact } from "@/lib/conversation-memory";
 
 export const useToolsFunctions = () => {
   const { t } = useTranslations();
@@ -121,6 +123,31 @@ export const useToolsFunctions = () => {
       return {
         success: false,
         message: `Failed to read clipboard: ${error}`,
+      };
+    }
+  };
+
+  const copyToClipboard = async ({ text }: { text: string }) => {
+    try {
+      if (window.electron?.clipboard) {
+        await window.electron.clipboard.write(text);
+      } else {
+        await navigator.clipboard.writeText(text);
+      }
+
+      toast.success("Copied to clipboard 📋", {
+        description: "Text copied successfully",
+      });
+      return {
+        success: true,
+        text,
+        message: "Text copied to clipboard successfully",
+      };
+    } catch (error) {
+      console.error("Failed to copy to clipboard:", error);
+      return {
+        success: false,
+        message: `Failed to copy to clipboard: ${error}`,
       };
     }
   };
@@ -255,6 +282,7 @@ export const useToolsFunctions = () => {
         if (result.success) {
           if (result.pending) {
             // Request is processing in background
+            playSound("/sounds/claude-request.mp3");
             toast.info("Processing...", {
               description: `Request ${result.requestId} started (PID: ${result.pid})`,
             });
@@ -329,16 +357,50 @@ export const useToolsFunctions = () => {
     }
   };
 
+  const saveConversationSummary = async ({ summary }: { summary: string }) => {
+    try {
+      if (!summary || summary.trim().length === 0) {
+        return { success: false, message: "No summary provided" };
+      }
+
+      const compact: ConversationCompact = {
+        summary: summary.slice(0, 500), // Limit to 500 chars
+        topics: [],
+        timestamp: new Date().toISOString(),
+        messageCount: 0,
+      };
+
+      await saveCompact(compact);
+
+      toast.success("Conversation saved", {
+        description: "Summary saved for future reference",
+      });
+
+      return {
+        success: true,
+        message: "Conversation summary saved successfully. You can now end the session.",
+      };
+    } catch (error) {
+      console.error("Failed to save conversation summary:", error);
+      return {
+        success: false,
+        message: `Failed to save summary: ${error}`,
+      };
+    }
+  };
+
   return {
     timeFunction,
     launchWebsite,
     readClipboard,
+    copyToClipboard,
     pasteText,
     scrapeWebsite,
     stopSession,
     adjustSystemVolume,
     askClaude,
     getClaudeOutput,
+    saveConversationSummary,
   };
 };
 

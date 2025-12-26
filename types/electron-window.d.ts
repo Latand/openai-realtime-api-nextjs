@@ -60,6 +60,32 @@ declare global {
           error?: string;
         }>;
       };
+      memory: {
+        saveCompacts: (
+          compacts: unknown[]
+        ) => Promise<{ success: boolean; error?: string }>;
+        loadCompacts: () => Promise<{
+          success: boolean;
+          compacts?: unknown[];
+          error?: string;
+        }>;
+        savePersistentNotes: (
+          notes: string[]
+        ) => Promise<{ success: boolean; error?: string }>;
+        loadPersistentNotes: () => Promise<{
+          success: boolean;
+          notes?: string[];
+          error?: string;
+        }>;
+        saveSystemPrompt: (
+          prompt: string
+        ) => Promise<{ success: boolean; error?: string }>;
+        loadSystemPrompt: () => Promise<{
+          success: boolean;
+          prompt?: string | null;
+          error?: string;
+        }>;
+      };
     };
   }
 }

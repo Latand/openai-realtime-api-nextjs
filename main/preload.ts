@@ -38,4 +38,15 @@ contextBridge.exposeInMainWorld("electron", {
       return await ipcRenderer.invoke("mcp:getTools");
     },
   },
+  memory: {
+    saveCompacts: (compacts: unknown[]) =>
+      ipcRenderer.invoke("memory:saveCompacts", compacts),
+    loadCompacts: () => ipcRenderer.invoke("memory:loadCompacts"),
+    savePersistentNotes: (notes: string[]) =>
+      ipcRenderer.invoke("memory:savePersistentNotes", notes),
+    loadPersistentNotes: () => ipcRenderer.invoke("memory:loadPersistentNotes"),
+    saveSystemPrompt: (prompt: string) =>
+      ipcRenderer.invoke("memory:saveSystemPrompt", prompt),
+    loadSystemPrompt: () => ipcRenderer.invoke("memory:loadSystemPrompt"),
+  },
 });

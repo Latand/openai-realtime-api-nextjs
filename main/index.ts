@@ -15,6 +15,7 @@ import {
 import next from "next";
 import { createServer, Server } from "http";
 import { execFile, spawn, exec } from "child_process";
+import * as fs from "fs";
 import { promisify } from "util";
 import { mcpService } from "./mcp-service";
 
@@ -260,6 +261,91 @@ ipcMain.handle("clipboard:read", async () => {
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error occurred";
     return { success: false, error: errorMessage };
+  }
+});
+
+// Conversation memory file storage
+const COMPACTS_FILE = path.join(app.getPath("userData"), "conversation-compacts.json");
+const PERSISTENT_NOTES_FILE = path.join(app.getPath("userData"), "persistent-notes.json");
+const SYSTEM_PROMPT_FILE = path.join(app.getPath("userData"), "system-prompt.txt");
+
+ipcMain.handle("memory:saveCompacts", async (_, compacts: unknown[]) => {
+  try {
+    fs.writeFileSync(COMPACTS_FILE, JSON.stringify(compacts, null, 2), "utf-8");
+    console.log("[Memory] Saved compacts to file:", COMPACTS_FILE);
+    return { success: true };
+  } catch (error) {
+    console.error("[Memory] Failed to save compacts:", error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle("memory:loadCompacts", async () => {
+  try {
+    if (!fs.existsSync(COMPACTS_FILE)) {
+      console.log("[Memory] No compacts file found");
+      return { success: true, compacts: [] };
+    }
+    const data = fs.readFileSync(COMPACTS_FILE, "utf-8");
+    const compacts = JSON.parse(data);
+    console.log("[Memory] Loaded compacts from file:", compacts.length);
+    return { success: true, compacts };
+  } catch (error) {
+    console.error("[Memory] Failed to load compacts:", error);
+    return { success: false, error: error instanceof Error ? error.message : String(error), compacts: [] };
+  }
+});
+
+ipcMain.handle("memory:savePersistentNotes", async (_, notes: string[]) => {
+  try {
+    fs.writeFileSync(PERSISTENT_NOTES_FILE, JSON.stringify(notes, null, 2), "utf-8");
+    console.log("[Memory] Saved persistent notes:", notes.length);
+    return { success: true };
+  } catch (error) {
+    console.error("[Memory] Failed to save persistent notes:", error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle("memory:loadPersistentNotes", async () => {
+  try {
+    if (!fs.existsSync(PERSISTENT_NOTES_FILE)) {
+      console.log("[Memory] No persistent notes file found");
+      return { success: true, notes: [] };
+    }
+    const data = fs.readFileSync(PERSISTENT_NOTES_FILE, "utf-8");
+    const notes = JSON.parse(data);
+    console.log("[Memory] Loaded persistent notes:", notes.length);
+    return { success: true, notes };
+  } catch (error) {
+    console.error("[Memory] Failed to load persistent notes:", error);
+    return { success: false, error: error instanceof Error ? error.message : String(error), notes: [] };
+  }
+});
+
+ipcMain.handle("memory:saveSystemPrompt", async (_, prompt: string) => {
+  try {
+    fs.writeFileSync(SYSTEM_PROMPT_FILE, prompt, "utf-8");
+    console.log("[Memory] Saved system prompt, length:", prompt.length);
+    return { success: true };
+  } catch (error) {
+    console.error("[Memory] Failed to save system prompt:", error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle("memory:loadSystemPrompt", async () => {
+  try {
+    if (!fs.existsSync(SYSTEM_PROMPT_FILE)) {
+      console.log("[Memory] No system prompt file found");
+      return { success: true, prompt: null };
+    }
+    const prompt = fs.readFileSync(SYSTEM_PROMPT_FILE, "utf-8");
+    console.log("[Memory] Loaded system prompt, length:", prompt.length);
+    return { success: true, prompt };
+  } catch (error) {
+    console.error("[Memory] Failed to load system prompt:", error);
+    return { success: false, error: error instanceof Error ? error.message : String(error), prompt: null };
   }
 });
 
