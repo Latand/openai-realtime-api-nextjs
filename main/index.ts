@@ -11,6 +11,7 @@ import {
   ipcMain,
   clipboard,
   screen,
+  globalShortcut,
 } from "electron";
 import next from "next";
 import { createServer, Server } from "http";
@@ -24,6 +25,8 @@ const execAsync = promisify(exec);
 const isDevelopment = !app.isPackaged;
 
 let mainWindow: BrowserWindow | null = null;
+let transcriptionWindow: BrowserWindow | null = null;
+let textImprovementWindow: BrowserWindow | null = null;
 let nextServer: Server | null = null;
 let nextServerUrl: string | null = null;
 
@@ -133,6 +136,96 @@ app.on("activate", () => {
   }
 });
 
+// Create transcription window
+async function createTranscriptionWindow(): Promise<BrowserWindow> {
+  const { width: screenWidth, height: screenHeight } =
+    screen.getPrimaryDisplay().workAreaSize;
+  const windowWidth = 450;
+  const windowHeight = 300;
+
+  const window = new BrowserWindow({
+    width: windowWidth,
+    height: windowHeight,
+    x: Math.floor((screenWidth - windowWidth) / 2),
+    y: 50,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, "preload.js"),
+    },
+    autoHideMenuBar: true,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: true,
+    skipTaskbar: true,
+  });
+
+  window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+  const url = isDevelopment
+    ? "http://localhost:3000/transcription"
+    : `${nextServerUrl}/transcription`;
+
+  await window.loadURL(url);
+
+  // Open DevTools in development for debugging
+  if (isDevelopment) {
+    window.webContents.openDevTools({ mode: 'detach' });
+  }
+
+  window.on("closed", () => {
+    transcriptionWindow = null;
+    mainWindow?.webContents.send("transcription:windowClosed");
+  });
+
+  return window;
+}
+
+// Create text improvement window
+async function createTextImprovementWindow(): Promise<BrowserWindow> {
+  const { width: screenWidth } = screen.getPrimaryDisplay().workAreaSize;
+  const windowWidth = 520;
+  const windowHeight = 400;
+
+  const window = new BrowserWindow({
+    width: windowWidth,
+    height: windowHeight,
+    x: Math.floor((screenWidth - windowWidth) / 2),
+    y: 60,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, "preload.js"),
+    },
+    autoHideMenuBar: true,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: true,
+    skipTaskbar: true,
+  });
+
+  window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+  const url = isDevelopment
+    ? "http://localhost:3000/text-improvement"
+    : `${nextServerUrl}/text-improvement`;
+
+  await window.loadURL(url);
+
+  if (isDevelopment) {
+    // window.webContents.openDevTools({ mode: 'detach' });
+  }
+
+  window.on("closed", () => {
+    textImprovementWindow = null;
+    mainWindow?.webContents.send("textImprovement:windowClosed");
+  });
+
+  return window;
+}
+
 // Create main BrowserWindow when electron is ready
 app.on("ready", async () => {
   mainWindow = await createMainWindow();
@@ -145,9 +238,125 @@ app.on("ready", async () => {
   ipcMain.handle("window:toggleDevTools", () => {
     mainWindow?.webContents.toggleDevTools();
   });
+
+  // Transcription window handlers
+  ipcMain.handle("transcription:openWindow", async () => {
+    if (transcriptionWindow) {
+      transcriptionWindow.focus();
+      return { success: true, alreadyOpen: true };
+    }
+    try {
+      transcriptionWindow = await createTranscriptionWindow();
+      return { success: true };
+    } catch (error) {
+      console.error("Failed to create transcription window:", error);
+      return { success: false, error: String(error) };
+    }
+  });
+
+  ipcMain.handle("transcription:closeWindow", () => {
+    if (transcriptionWindow) {
+      transcriptionWindow.close();
+      transcriptionWindow = null;
+    }
+    return { success: true };
+  });
+
+  ipcMain.handle("transcription:updateText", (_, text: string, interim: string) => {
+    if (transcriptionWindow) {
+      transcriptionWindow.webContents.send("transcription:textUpdate", { text, interim });
+    }
+    return { success: true };
+  });
+
+  ipcMain.handle("transcription:updateProcessingState", (_, isProcessing: boolean, recordingDuration: number) => {
+    if (transcriptionWindow) {
+      transcriptionWindow.webContents.send("transcription:processingState", { isProcessing, recordingDuration });
+    }
+    return { success: true };
+  });
+
+  // Text Improvement window handlers
+  ipcMain.handle("textImprovement:openWindow", async () => {
+    if (textImprovementWindow) {
+      textImprovementWindow.show();
+      textImprovementWindow.focus();
+      return { success: true, alreadyOpen: true };
+    }
+    try {
+      textImprovementWindow = await createTextImprovementWindow();
+      return { success: true };
+    } catch (error) {
+      console.error("Failed to create text improvement window:", error);
+      return { success: false, error: String(error) };
+    }
+  });
+
+  ipcMain.handle("textImprovement:closeWindow", () => {
+    if (textImprovementWindow) {
+      textImprovementWindow.close();
+      textImprovementWindow = null;
+    }
+    return { success: true };
+  });
+
+  ipcMain.handle("textImprovement:saveSettings", async (_, settings: any) => {
+    try {
+      fs.writeFileSync(TEXT_IMPROVEMENT_SETTINGS_FILE, JSON.stringify(settings, null, 2), "utf-8");
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: String(error) };
+    }
+  });
+
+  ipcMain.handle("textImprovement:loadSettings", async () => {
+    try {
+      if (!fs.existsSync(TEXT_IMPROVEMENT_SETTINGS_FILE)) {
+        return { success: true, settings: {} };
+      }
+      const data = fs.readFileSync(TEXT_IMPROVEMENT_SETTINGS_FILE, "utf-8");
+      return { success: true, settings: JSON.parse(data) };
+    } catch (error) {
+      return { success: false, error: String(error), settings: {} };
+    }
+  });
+
+  ipcMain.handle("textImprovement:resize", (_, width: number, height: number) => {
+    if (textImprovementWindow) {
+      textImprovementWindow.setSize(width, height);
+    }
+    return { success: true };
+  });
+
+  // Register global shortcuts
+  // Using Ctrl+Shift for better compatibility across apps
+  globalShortcut.register("CommandOrControl+Shift+T", () => {
+    console.log("[GlobalShortcut] Ctrl+Shift+T pressed - toggle real-time transcription");
+    mainWindow?.webContents.send("shortcut:toggleTranscription");
+  });
+
+  globalShortcut.register("CommandOrControl+Shift+R", () => {
+    console.log("[GlobalShortcut] Ctrl+Shift+R pressed - toggle Whisper transcription");
+    mainWindow?.webContents.send("shortcut:toggleWhisper");
+  });
+
+  globalShortcut.register("CommandOrControl+Shift+M", () => {
+    console.log("[GlobalShortcut] Ctrl+Shift+M pressed - toggle mute");
+    mainWindow?.webContents.send("shortcut:toggleMute");
+  });
+
+  globalShortcut.register("CommandOrControl+Shift+G", () => {
+    console.log("[GlobalShortcut] Ctrl+Shift+G pressed - toggle text improvement");
+    mainWindow?.webContents.send("shortcut:toggleTextImprovement");
+  });
+
+  console.log("[GlobalShortcut] Registered Ctrl+Shift+T, Ctrl+Shift+R and Ctrl+Shift+M");
 });
 
 app.on("will-quit", async () => {
+  // Unregister all global shortcuts
+  globalShortcut.unregisterAll();
+
   // Cleanup MCP service
   await mcpService.disconnect();
   await stopNextServer();
@@ -267,6 +476,7 @@ ipcMain.handle("clipboard:read", async () => {
 // Conversation memory file storage
 const COMPACTS_FILE = path.join(app.getPath("userData"), "conversation-compacts.json");
 const PERSISTENT_NOTES_FILE = path.join(app.getPath("userData"), "persistent-notes.json");
+const TEXT_IMPROVEMENT_SETTINGS_FILE = path.join(app.getPath("userData"), "text-improvement-settings.json");
 const SYSTEM_PROMPT_FILE = path.join(app.getPath("userData"), "system-prompt.txt");
 
 ipcMain.handle("memory:saveCompacts", async (_, compacts: unknown[]) => {

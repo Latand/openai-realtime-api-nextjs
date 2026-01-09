@@ -194,10 +194,46 @@ export function SummariesWindow({
         const element = e.currentTarget as HTMLDivElement;
         const index = parseInt(element.getAttribute("data-index") || "0", 10);
         const currentNote = persistentNotes[index];
-        const newNote = prompt("Edit note:", currentNote);
-        if (newNote !== null && newNote.trim() !== "") {
-          onUpdateNoteRef.current(index, newNote.trim());
-        }
+
+        // Replace text with input field for inline editing
+        const input = windowRef.current!.document.createElement("input");
+        input.type = "text";
+        input.value = currentNote;
+        input.className = "edit-input";
+        input.style.cssText = "width: 100%; background: #1a1a2e; border: 1px solid #3b82f6; border-radius: 4px; padding: 6px 8px; color: #eee; font-size: 14px; outline: none;";
+
+        element.replaceWith(input);
+        input.focus();
+        input.select();
+
+        let saved = false;
+        const saveEdit = () => {
+          if (saved) return;
+          saved = true;
+          const newNote = input.value.trim();
+          if (newNote && newNote !== currentNote) {
+            onUpdateNoteRef.current(index, newNote);
+            showToast("Note updated");
+          } else {
+            // Restore original text element if unchanged
+            const textDiv = windowRef.current!.document.createElement("div");
+            textDiv.className = "note-text clickable";
+            textDiv.setAttribute("data-index", String(index));
+            textDiv.setAttribute("title", "Click to edit");
+            textDiv.textContent = currentNote;
+            input.replaceWith(textDiv);
+          }
+        };
+
+        input.addEventListener("blur", saveEdit);
+        input.addEventListener("keydown", (ke) => {
+          if (ke.key === "Enter") {
+            input.blur();
+          } else if (ke.key === "Escape") {
+            input.value = currentNote; // Reset to original
+            input.blur();
+          }
+        });
       });
     });
 
@@ -206,7 +242,7 @@ export function SummariesWindow({
     if (countEl) {
       countEl.textContent = `${persistentNotes.length} notes`;
     }
-  }, [persistentNotes]);
+  }, [persistentNotes, showToast]);
 
   const updatePromptTab = useCallback(() => {
     if (!windowRef.current) return;

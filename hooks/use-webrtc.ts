@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback, type RefObject } from "react"
 import { v4 as uuidv4 } from "uuid";
 import { Conversation } from "@/lib/conversations";
 import { useTranslations } from "@/components/translations-context";
+import { playSound } from "@/lib/tools";
 
 declare global {
   interface Window {
@@ -45,6 +46,8 @@ interface UseWebRTCAudioSessionReturn {
   sendTextMessage: (text: string) => void;
   sendFunctionOutput: (callId: string, output: any) => boolean;
   clearConversation: () => void;
+  isMuted: boolean;
+  toggleMute: () => void;
 }
 /**
  * Normalizes the parameters schema:
@@ -117,6 +120,7 @@ export default function useWebRTCAudioSession(
   // Connection/session states
   const [status, setStatus] = useState("Waiting for MCP definitions...");
   const [isSessionActive, setIsSessionActive] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
 
   // Initialize tools array with provided tools or empty array, ensuring both arrays exist
   const [allTools, setAllTools] = useState<Tool[]>([]);
@@ -219,7 +223,7 @@ export default function useWebRTCAudioSession(
           type: "server_vad",
           threshold: 0.9, // Higher = less sensitive (0.0-1.0), default is ~0.5
           prefix_padding_ms: 500,
-          silence_duration_ms: 800,
+          silence_duration_ms: 1500,
         },
         instructions,
       },
@@ -455,6 +459,10 @@ export default function useWebRTCAudioSession(
           };
 
           if (fn) {
+            // Play sound for tool execution (skip for silent polling tools)
+            if (shouldLog) {
+              playSound("/sounds/claude-request.mp3");
+            }
             try {
               const result = await fn(parsedArgs);
               updateToolCall(result);
@@ -859,6 +867,21 @@ export default function useWebRTCAudioSession(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /**
+   * Toggle microphone mute state
+   */
+  function toggleMute() {
+    if (!audioStreamRef.current) return;
+
+    const audioTrack = audioStreamRef.current.getAudioTracks()[0];
+    if (audioTrack) {
+      const newMutedState = !isMuted;
+      audioTrack.enabled = !newMutedState;
+      setIsMuted(newMutedState);
+      console.log(`[Mute] Microphone ${newMutedState ? "muted" : "unmuted"}`);
+    }
+  }
+
   return {
     status,
     isSessionActive,
@@ -873,5 +896,7 @@ export default function useWebRTCAudioSession(
     sendTextMessage,
     sendFunctionOutput,
     clearConversation,
+    isMuted,
+    toggleMute,
   };
 }

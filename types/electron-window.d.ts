@@ -9,6 +9,11 @@ declare global {
       onClaudeError: (
         callback: (data: { requestId: string; error: string }) => void
       ) => () => void;
+      // Global shortcut events
+      onToggleTranscription: (callback: () => void) => () => void;
+      onToggleWhisper: (callback: () => void) => () => void;
+      onToggleMute: (callback: () => void) => () => void;
+      onToggleTextImprovement: (callback: () => void) => () => void;
       clipboard: {
         write: (
           text: string
@@ -85,6 +90,23 @@ declare global {
           prompt?: string | null;
           error?: string;
         }>;
+      };
+      transcription: {
+        openWindow: () => Promise<{ success: boolean; alreadyOpen?: boolean; error?: string }>;
+        closeWindow: () => Promise<{ success: boolean }>;
+        updateText: (text: string, interim: string) => Promise<{ success: boolean }>;
+        updateProcessingState: (isProcessing: boolean, recordingDuration: number) => Promise<{ success: boolean }>;
+        onTextUpdate: (callback: (data: { text: string; interim: string }) => void) => () => void;
+        onProcessingState: (callback: (data: { isProcessing: boolean; recordingDuration: number }) => void) => () => void;
+        onWindowClosed: (callback: () => void) => () => void;
+      };
+      textImprovement: {
+        openWindow: () => Promise<{ success: boolean; alreadyOpen?: boolean; error?: string }>;
+        closeWindow: () => Promise<{ success: boolean }>;
+        saveSettings: (settings: any) => Promise<{ success: boolean; error?: string }>;
+        loadSettings: () => Promise<{ success: boolean; settings: any; error?: string }>;
+        resize: (width: number, height: number) => Promise<{ success: boolean }>;
+        onWindowClosed: (callback: () => void) => () => void;
       };
     };
   }

@@ -153,6 +153,13 @@ export function TranscriptWindow({
                   color: #fca5a5;
                   border-left-color: #ef4444;
                 }
+                .message.transcription {
+                  background: #4c1d95;
+                  color: #e9d5ff;
+                  align-self: flex-end;
+                  border-bottom-right-radius: 4px;
+                  border-left: 3px solid #a855f7;
+                }
                 .message .role {
                   font-size: 10px;
                   text-transform: uppercase;
@@ -429,10 +436,13 @@ export function TranscriptWindow({
           `;
         }
 
+        // Show special label for transcription entries
+        const roleLabel = msg.role === "transcription" ? "📝 transcription" : msg.role;
+
         return `
           <div class="message ${msg.role} ${statusClass}">
             <div class="message-header">
-              <div class="role">${msg.role}${statusIndicator}</div>
+              <div class="role">${roleLabel}${statusIndicator}</div>
               <button class="copy-btn" data-copy="${escapeHtml(msg.text || "")}" title="Copy">📋</button>
             </div>
             <div class="text">${escapeHtml(msg.text || "...")}</div>

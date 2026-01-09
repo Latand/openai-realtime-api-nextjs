@@ -17,7 +17,7 @@ export function BroadcastButton({
       variant={
         isSessionActive ? "destructive" : detected ? "secondary" : "default"
       }
-      className={`w-full py-6 text-lg font-medium flex items-center justify-center gap-2 motion-preset-shake ${
+      className={`w-full py-6 text-lg font-medium flex items-center justify-center gap-2 focus:ring-0 focus:ring-offset-0 ${
         detected && !isSessionActive ? "opacity-50 cursor-not-allowed" : ""
       }`}
       onClick={onClick}

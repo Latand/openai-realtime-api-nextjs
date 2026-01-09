@@ -13,12 +13,14 @@ export interface WakeWordConfig {
   };
   keywords: PorcupineKeyword[];
   accessKey: string;
+  deviceId?: string;
 }
 
 export function useWakeWord(config: WakeWordConfig) {
   const [isReady, setIsReady] = useState(false);
   const [detected, setDetected] = useState(false);
   const initCalledRef = useRef(false);
+  const currentDeviceIdRef = useRef<string | undefined>(config.deviceId);
 
   const {
     init,
@@ -64,9 +66,27 @@ export function useWakeWord(config: WakeWordConfig) {
     const shouldListen = config.enabled && !config.sessionActive;
     console.log("[useWakeWord] isLoaded:", isLoaded, "shouldListen:", shouldListen, "isListening:", isListening);
 
+    // Check if device changed while listening
+    const deviceChanged = currentDeviceIdRef.current !== config.deviceId;
+    if (deviceChanged && isListening) {
+      console.log("[useWakeWord] Device changed, restarting with new device:", config.deviceId);
+      currentDeviceIdRef.current = config.deviceId;
+      stop().then(() => {
+        const startOptions = config.deviceId ? { deviceId: config.deviceId } : undefined;
+        return start(startOptions);
+      }).then(() => {
+        console.log("[useWakeWord] Restarted with new device");
+      }).catch(err => {
+        console.error("[useWakeWord] restart error:", err);
+      });
+      return;
+    }
+
     if (shouldListen && !isListening) {
-      console.log("[useWakeWord] Starting...");
-      start().then(() => {
+      console.log("[useWakeWord] Starting with deviceId:", config.deviceId);
+      currentDeviceIdRef.current = config.deviceId;
+      const startOptions = config.deviceId ? { deviceId: config.deviceId } : undefined;
+      start(startOptions).then(() => {
         console.log("[useWakeWord] start() resolved");
         setIsReady(true);
       }).catch(err => {
@@ -81,7 +101,7 @@ export function useWakeWord(config: WakeWordConfig) {
         console.error("[useWakeWord] stop() error:", err);
       });
     }
-  }, [isLoaded, config.enabled, config.sessionActive, isListening, start, stop]);
+  }, [isLoaded, config.enabled, config.sessionActive, config.deviceId, isListening, start, stop]);
 
   // Handle keyword detection with debounce
   const lastDetectionRef = useRef<number>(0);
