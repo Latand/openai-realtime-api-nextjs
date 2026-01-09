@@ -266,6 +266,18 @@ export default function TextImprovementPage() {
       setImprovedText(data.improvedText);
       setStatus('success');
 
+      // Auto-copy to clipboard
+      try {
+        if (window.electron?.clipboard) {
+          await window.electron.clipboard.write(data.improvedText);
+        } else {
+          await navigator.clipboard.writeText(data.improvedText);
+        }
+        toast.success("Improved text copied to clipboard");
+      } catch (copyErr) {
+        console.error("Failed to auto-copy:", copyErr);
+      }
+
       // Play finished sound
       playSound("/sounds/transcription-finished.mp3");
     } catch (error) {
