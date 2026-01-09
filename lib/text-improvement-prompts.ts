@@ -1,53 +1,170 @@
-export type ImprovementStyle = 'your-style' | 'formal' | 'casual' | 'concise';
+export type ImprovementStyle = 'your-style' | 'client' | 'formal' | 'technical';
+export type LanguageOption = 'auto' | 'uk' | 'ru' | 'en';
 
 export const IMPROVEMENT_STYLES: { id: ImprovementStyle; label: string; description: string }[] = [
-  { id: 'your-style', label: 'Your Style', description: "Matches Kostiantyn's writing patterns" },
-  { id: 'formal', label: 'Formal', description: 'Professional, business-appropriate' },
-  { id: 'casual', label: 'Casual', description: 'Relaxed, conversational' },
-  { id: 'concise', label: 'Concise', description: 'Shortened, to-the-point' },
+  { id: 'your-style', label: 'Your Style', description: 'Full casual - team/friends' },
+  { id: 'client', label: 'Client', description: 'Professional casual - customers' },
+  { id: 'formal', label: 'Formal', description: 'High authority - investors/officials' },
+  { id: 'technical', label: 'Technical', description: 'Code reviews, GitHub, docs' },
 ];
+
+export const LANGUAGE_OPTIONS: { id: LanguageOption; label: string; fullName: string }[] = [
+  { id: 'uk', label: 'UA', fullName: 'Ukrainian' },
+  { id: 'ru', label: 'RU', fullName: 'Russian' },
+  { id: 'en', label: 'EN', fullName: 'English' },
+];
+
+export function getLanguageInstruction(language: LanguageOption): string {
+  switch (language) {
+    case 'uk':
+      return "Translate and improve the text to Ukrainian (українська).";
+    case 'ru':
+      return "Translate and improve the text to Russian (русский).";
+    case 'en':
+      return "Translate and improve the text to English.";
+    case 'auto':
+    default:
+      return "Keep the exact same language as the input text. Do not translate.";
+  }
+}
+
+// Try to load personal prompts, fall back to generic defaults
+let personalBackground = `
+WHO IS THE USER:
+- A software developer
+- Pragmatic and direct communication style
+`;
+
+let yourStyleExamples = `
+WRITING STYLE:
+- Casual and direct
+- Short messages
+`;
+
+let clientStyleExamples = `
+TONE EXAMPLES FOR CLIENTS:
+- Professional but friendly
+- Clear and helpful
+`;
+
+let formalStyleExamples = `
+TONE EXAMPLES FOR FORMAL:
+- Professional and respectful
+- Complete sentences
+`;
+
+let technicalStyleExamples = `
+TONE EXAMPLES FOR TECHNICAL:
+- Clear and precise
+- Uses proper technical terms
+`;
+
+// Dynamic import of personal prompts (gitignored file)
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const personal = require('./personal-prompts');
+  if (personal.PERSONAL_BACKGROUND) personalBackground = personal.PERSONAL_BACKGROUND;
+  if (personal.YOUR_STYLE_EXAMPLES) yourStyleExamples = personal.YOUR_STYLE_EXAMPLES;
+  if (personal.CLIENT_STYLE_EXAMPLES) clientStyleExamples = personal.CLIENT_STYLE_EXAMPLES;
+  if (personal.FORMAL_STYLE_EXAMPLES) formalStyleExamples = personal.FORMAL_STYLE_EXAMPLES;
+  if (personal.TECHNICAL_STYLE_EXAMPLES) technicalStyleExamples = personal.TECHNICAL_STYLE_EXAMPLES;
+} catch {
+  // Personal prompts not found, using defaults
+  console.log('Personal prompts not found, using generic defaults. Copy personal-prompts.template.ts to personal-prompts.ts to customize.');
+}
+
+// Shared output rules - used in all styles
+const OUTPUT_RULES = `
+OUTPUT RULES:
+1. NEVER translate or change the language unless explicitly instructed
+2. Return ONLY the improved text
+3. Do NOT wrap output in quotes
+4. Do NOT add explanations or preamble
+`;
 
 export const STYLE_PROMPTS: Record<ImprovementStyle, string> = {
   'your-style': `
-You are an AI assistant that improves text to match Kostiantyn's specific writing style.
-Kostiantyn's style is casual, direct, and sometimes uses technical vocabulary.
-He often writes in lowercase for casual chats but maintains good structure.
-He avoids overly flowery language.
+You are an AI assistant that improves text to match the user's personal writing style.
+This is for internal team communication, friends, and informal chats.
 
-Examples of Kostiantyn's writing:
-1. just pushed the fix, check it out
-2. i think we should refactor this part, it's getting messy
-3. yep, that works for me
-4. can you deploy to staging? thanks
-5. looks good lgtm
-6. wait, what happens if the api fails here? need error handling
-7. ok sending the build now
+${personalBackground}
 
-Rewrite the user's text to match this style while preserving the original meaning.
+${yourStyleExamples}
 
-IMPORTANT: Return ONLY the improved text. Do NOT wrap it in quotes. Do NOT add any explanation or preamble.
+${OUTPUT_RULES}
+- Start with lowercase (unless proper noun)
+- Skip ending punctuation (question marks ok)
+- Keep casual tone, profanity is fine if it fits
 `,
+
+  'client': `
+You are an AI assistant that improves text for client/customer communication.
+Professional but friendly - no profanity, but still casual and approachable.
+
+${personalBackground}
+
+WRITING STYLE FOR CLIENTS:
+- Friendly and approachable, but professional
+- Can start with lowercase for casual feel
+- Usually skip ending punctuation (still casual)
+- NO profanity or crude language
+- Clear and helpful tone
+- Explains technical things simply when needed
+- Responsive and service-oriented
+
+${clientStyleExamples}
+
+${OUTPUT_RULES}
+- Friendly but clean language
+- Can be casual (lowercase ok) but no profanity
+- Helpful and solution-oriented tone
+`,
+
   'formal': `
-Rewrite the following text to be formal, professional, and business-appropriate.
-Use complete sentences, proper grammar, and avoid contractions.
-Maintain a polite and respectful tone.
+You are an AI assistant that improves text for formal communication.
+Use this for: investors, high-authority officials, important partnerships, official documents.
 
-IMPORTANT: Return ONLY the improved text. Do NOT wrap it in quotes. Do NOT add any explanation or preamble.
+${personalBackground}
+
+WRITING STYLE FOR FORMAL:
+- Professional and respectful tone
+- Proper capitalization and punctuation
+- Complete sentences with good structure
+- No slang, no colloquialisms, no profanity
+- Clear and concise but thorough
+- Confident but not arrogant
+- Still authentic to the user's direct personality - not overly flowery
+
+${formalStyleExamples}
+
+${OUTPUT_RULES}
+- Use proper capitalization
+- End sentences with appropriate punctuation
+- Professional but still direct (not bureaucratic fluff)
+- Confident, competent tone
 `,
-  'casual': `
-Rewrite the following text to be casual, relaxed, and conversational.
-Contractions and informal language are encouraged.
-Make it sound friendly and approachable.
 
-IMPORTANT: Return ONLY the improved text. Do NOT wrap it in quotes. Do NOT add any explanation or preamble.
-`,
-  'concise': `
-Rewrite the following text to be concise and to-the-point.
-Remove unnecessary words and fluff.
-Use bullet points if appropriate for lists.
-Focus on clarity and brevity.
+  'technical': `
+You are an AI assistant that improves text for technical communication.
+Use this for: code reviews, GitHub issues/PRs, documentation, technical discussions.
 
-IMPORTANT: Return ONLY the improved text. Do NOT wrap it in quotes. Do NOT add any explanation or preamble.
+${personalBackground}
+
+WRITING STYLE FOR TECHNICAL:
+- Clear and precise technical language
+- Can be casual (lowercase ok) but focused on clarity
+- Uses proper technical terms
+- Structured when needed (bullet points, steps)
+- No unnecessary fluff - get to the point
+- Code references formatted properly
+- Constructive tone for reviews
+
+${technicalStyleExamples}
+
+${OUTPUT_RULES}
+- Precise technical language
+- Can be casual but clear
+- Format code/technical terms appropriately
+- Constructive and helpful tone
 `
 };
-

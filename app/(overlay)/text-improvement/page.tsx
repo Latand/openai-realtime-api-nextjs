@@ -1,11 +1,10 @@
 "use client";
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
 import { Instrument_Serif, Geist_Mono } from "next/font/google";
 import { X, Copy, Check, RefreshCw, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
-import { IMPROVEMENT_STYLES, ImprovementStyle } from "@/lib/text-improvement-prompts";
+import { IMPROVEMENT_STYLES, ImprovementStyle, LANGUAGE_OPTIONS, LanguageOption } from "@/lib/text-improvement-prompts";
 import { playSound } from "@/lib/tools";
 
 const instrumentSerif = Instrument_Serif({
@@ -127,6 +126,13 @@ const styles = `
   line-height: 1.6;
   color: var(--text-primary);
   white-space: pre-wrap;
+  resize: none; /* Disable native resize handle */
+}
+
+.text-box:focus {
+  outline: none;
+  border-color: var(--border-accent);
+  box-shadow: 0 0 0 1px var(--accent-glow);
 }
 
 .text-box--improved {
@@ -149,12 +155,8 @@ const styles = `
 }
 
 .improved-text {
-  animation: textReveal 0.4s ease-out;
-}
-
-@keyframes textReveal {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  /* animation: textReveal 0.4s ease-out; Remove reveal animation for streaming */
+  white-space: pre-wrap;
 }
 
 /* Scrollbar */
@@ -164,79 +166,95 @@ const styles = `
 `;
 
 export default function TextImprovementPage() {
-  const searchParams = useSearchParams();
   const [originalText, setOriginalText] = useState("");
   const [improvedText, setImprovedText] = useState("");
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [style, setStyle] = useState<ImprovementStyle>('your-style');
+  const [language, setLanguage] = useState<LanguageOption>('auto');
   const [instructions, setInstructions] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isCopied, setIsCopied] = useState(false);
+  const [initialized, setInitialized] = useState(false);
 
   const instructionsInputRef = useRef<HTMLInputElement>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const originalTextDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const settingsRef = useRef<{ style: ImprovementStyle; language: LanguageOption }>({ style: 'your-style', language: 'auto' });
 
-  // Load initial state and text (from URL param or clipboard)
+  // Load saved settings on mount
   useEffect(() => {
-    const initialize = async () => {
-      // Load saved style
+    const loadSettings = async () => {
       if (window.electron?.textImprovement) {
         const { settings } = await window.electron.textImprovement.loadSettings();
         if (settings?.lastStyle && IMPROVEMENT_STYLES.some(s => s.id === settings.lastStyle)) {
           setStyle(settings.lastStyle);
+          settingsRef.current.style = settings.lastStyle;
         }
-      }
-
-      // Check for initial text from URL parameter first (from transcription)
-      const urlText = searchParams.get('text');
-      if (urlText && urlText.trim().length > 0) {
-        const decodedText = decodeURIComponent(urlText).trim();
-        setOriginalText(decodedText);
-        // Trigger improvement immediately
-        improveText(decodedText, settingsStyleRef.current || 'your-style', "");
-        return;
-      }
-
-      // Fall back to clipboard
-      if (window.electron?.clipboard) {
-        const { text } = await window.electron.clipboard.readText();
-        if (text && text.trim().length > 0) {
-          setOriginalText(text.trim());
-          // Trigger improvement immediately
-          improveText(text.trim(), settingsStyleRef.current || 'your-style', "");
-        } else {
-          setOriginalText("");
+        if (settings?.lastLanguage && ['auto', 'uk', 'ru', 'en'].includes(settings.lastLanguage)) {
+          setLanguage(settings.lastLanguage);
+          settingsRef.current.language = settings.lastLanguage;
         }
       }
     };
+    loadSettings();
+  }, []);
 
-    initialize();
+  // Listen for initial text from main process (via IPC)
+  useEffect(() => {
+    const unsubscribe = window.electron?.textImprovement?.onInitialText?.((data) => {
+      console.log("[TextImprovement] Received initial text via IPC, length:", data.text?.length);
+      if (data.text && data.text.trim().length > 0) {
+        const text = data.text.trim();
+        setOriginalText(text);
+        setInitialized(true);
+        // Use refs to get current settings since state may not be updated yet
+        improveText(text, settingsRef.current.style, settingsRef.current.language, "");
+      }
+    });
+    return () => unsubscribe?.();
+  }, []);
 
-    // Resize window based on content
+  // Fall back to clipboard if no initial text received via IPC
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (!initialized && !originalText) {
+        console.log("[TextImprovement] No IPC text received, falling back to clipboard");
+        if (window.electron?.clipboard) {
+          const { text } = await window.electron.clipboard.readText();
+          if (text && text.trim().length > 0) {
+            setOriginalText(text.trim());
+            setInitialized(true);
+            improveText(text.trim(), settingsRef.current.style, settingsRef.current.language, "");
+          }
+        }
+      }
+    }, 200); // Small delay to allow IPC message to arrive first
+
+    return () => clearTimeout(timer);
+  }, [initialized, originalText]);
+
+  // Resize window based on content
+  useEffect(() => {
     const resizeObserver = new ResizeObserver(() => {
-       const height = document.body.scrollHeight;
-       if (height > 0 && window.electron?.textImprovement) {
-           // Add some padding and limit max height
-           const newHeight = Math.min(Math.max(height, 350), 600);
-           // We generally only want to grow, or shrink if content significantly reduced
-           // For now let's just let it be dynamic
-           window.electron.textImprovement.resize(520, newHeight);
-       }
+      const height = document.body.scrollHeight;
+      if (height > 0 && window.electron?.textImprovement) {
+        const newHeight = Math.min(Math.max(height, 350), 700);
+        window.electron.textImprovement.resize(520, newHeight);
+      }
     });
     resizeObserver.observe(document.body);
-
     return () => resizeObserver.disconnect();
-  }, [searchParams]);
+  }, []);
 
-  // Use ref to access latest style in async calls without dependency loop
-  const settingsStyleRef = useRef(style);
+  // Save settings whenever they change
   useEffect(() => {
-    settingsStyleRef.current = style;
-    // Save style
-    window.electron?.textImprovement?.saveSettings({ lastStyle: style });
-  }, [style]);
+    window.electron?.textImprovement?.saveSettings({ 
+      lastStyle: style,
+      lastLanguage: language
+    });
+  }, [style, language]);
 
-  const improveText = async (text: string, currentStyle: ImprovementStyle, currentInstructions: string) => {
+  const improveText = async (text: string, currentStyle: ImprovementStyle, currentLanguage: LanguageOption, currentInstructions: string) => {
     if (!text) return;
 
     setStatus('loading');
@@ -253,29 +271,38 @@ export default function TextImprovementPage() {
         body: JSON.stringify({
           originalText: text,
           style: currentStyle,
+          language: currentLanguage,
           additionalInstructions: currentInstructions
         })
       });
 
-      const data = await response.json();
-
       if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to improve text');
       }
 
-      setImprovedText(data.improvedText);
+      if (!response.body) throw new Error("No response body");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedText = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        accumulatedText += chunk;
+        setImprovedText(accumulatedText);
+      }
+
       setStatus('success');
 
-      // Auto-copy to clipboard
-      try {
-        if (window.electron?.clipboard) {
-          await window.electron.clipboard.write(data.improvedText);
-        } else {
-          await navigator.clipboard.writeText(data.improvedText);
-        }
-        toast.success("Improved text copied to clipboard");
-      } catch (copyErr) {
-        console.error("Failed to auto-copy:", copyErr);
+      // Auto-copy to clipboard after generation completes
+      if (accumulatedText && window.electron?.clipboard) {
+        await window.electron.clipboard.write(accumulatedText);
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2000);
       }
 
       // Play finished sound
@@ -287,15 +314,33 @@ export default function TextImprovementPage() {
     }
   };
 
-  // Re-run when style changes (but only if we have text)
+  const handleOriginalTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setOriginalText(val);
+
+    if (originalTextDebounceRef.current) clearTimeout(originalTextDebounceRef.current);
+    originalTextDebounceRef.current = setTimeout(() => {
+      if (val.trim().length > 0) {
+        improveText(val, style, language, instructions);
+      }
+    }, 1000);
+  };
+
   const handleStyleChange = (newStyle: ImprovementStyle) => {
     setStyle(newStyle);
     if (originalText) {
-      improveText(originalText, newStyle, instructions);
+      improveText(originalText, newStyle, language, instructions);
     }
   };
 
-  // Re-run when instructions change (debounced)
+  const handleLanguageChange = (selectedLang: string) => {
+    const newLang = (language === selectedLang ? 'auto' : selectedLang) as LanguageOption;
+    setLanguage(newLang);
+    if (originalText) {
+      improveText(originalText, style, newLang, instructions);
+    }
+  };
+
   const handleInstructionsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setInstructions(val);
@@ -304,7 +349,7 @@ export default function TextImprovementPage() {
     
     debounceTimerRef.current = setTimeout(() => {
       if (originalText) {
-        improveText(originalText, style, val);
+        improveText(originalText, style, language, val);
       }
     }, 1000);
   };
@@ -343,11 +388,19 @@ export default function TextImprovementPage() {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         handleCopyAndClose();
       }
+      // Note: Cmd+C is handled natively by textarea/browser selection usually, 
+      // but we override if no selection.
       if ((e.ctrlKey || e.metaKey) && e.key === "c") {
-        // If user has selected text, default copy works.
-        // If no selection and we have result, copy result.
         const selection = window.getSelection();
         if (!selection || selection.toString().length === 0) {
+           // If focus is in textarea, let native copy handle it (it copies nothing if no selection?)
+           // Actually native copy with no selection usually copies line or nothing.
+           // We want to prioritize copying the Result if nothing selected.
+           // But if user is editing Original Text, they might want to copy that.
+           // Let's check active element.
+           if (document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "INPUT") {
+             return; // Let native behavior handle input fields
+           }
            handleCopy();
         }
       }
@@ -355,6 +408,16 @@ export default function TextImprovementPage() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [improvedText]);
+
+  const getLanguageStatusText = () => {
+    switch (language) {
+      case 'uk': return "Translating to Ukrainian";
+      case 'ru': return "Translating to Russian";
+      case 'en': return "Translating to English";
+      case 'auto': 
+      default: return "Keeping original language";
+    }
+  };
 
   return (
     <div className={`p-1 h-full w-full ${instrumentSerif.variable} ${geistMono.variable}`}>
@@ -382,12 +445,19 @@ export default function TextImprovementPage() {
           <div className="section-label">
             <span>Original</span>
           </div>
-          <div className="text-box">
-            {originalText || <span className="text-[var(--text-muted)] italic">No text found in clipboard...</span>}
-          </div>
+          <textarea
+            className="text-box w-full bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-xl p-4 min-h-[80px] text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--border-accent)] focus:ring-1 focus:ring-[var(--accent-glow)] transition-all resize-none"
+            value={originalText}
+            onChange={handleOriginalTextChange}
+            placeholder="Paste or type text here..."
+            spellCheck={false}
+          />
 
           {/* Style Selector */}
-          <div className="mt-4 p-1 bg-[var(--bg-elevated)] rounded-xl border border-[var(--border-subtle)] flex gap-1">
+          <div className="section-label mt-4">
+            <span>Style</span>
+          </div>
+          <div className="p-1 bg-[var(--bg-elevated)] rounded-xl border border-[var(--border-subtle)] flex gap-1">
             {IMPROVEMENT_STYLES.map((s) => (
               <button
                 key={s.id}
@@ -403,8 +473,31 @@ export default function TextImprovementPage() {
             ))}
           </div>
 
+          {/* Language Selector */}
+          <div className="section-label mt-4 flex justify-between items-center">
+            <span>Language</span>
+            <span className={`text-[10px] font-mono tracking-wide ${language === 'auto' ? 'text-[var(--text-muted)]' : 'text-[var(--accent-primary)]'}`}>
+              {getLanguageStatusText()}
+            </span>
+          </div>
+          <div className="p-1 bg-[var(--bg-elevated)] rounded-xl border border-[var(--border-subtle)] flex gap-1">
+            {LANGUAGE_OPTIONS.map((lang) => (
+              <button
+                key={lang.id}
+                onClick={() => handleLanguageChange(lang.id)}
+                className={`flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-all duration-200 ${
+                  language === lang.id
+                    ? 'bg-[var(--accent-primary)] text-[#0a0f14] shadow-sm'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
+                }`}
+              >
+                {lang.label}
+              </button>
+            ))}
+          </div>
+
           {/* Additional Instructions */}
-          <div className="mt-3">
+          <div className="mt-4">
              <input
                ref={instructionsInputRef}
                type="text"
@@ -428,15 +521,15 @@ export default function TextImprovementPage() {
                    <span>{errorMessage}</span>
                 </div>
                 <button 
-                   onClick={() => improveText(originalText, style, instructions)}
+                   onClick={() => improveText(originalText, style, language, instructions)}
                    className="self-start px-3 py-1 bg-red-500/20 hover:bg-red-500/30 rounded text-xs mt-1 transition-colors flex items-center gap-1"
                 >
                    <RefreshCw size={12} /> Retry
                 </button>
              </div>
           ) : (
-            <div className={`text-box ${improvedText ? 'text-box--improved' : ''}`}>
-               {status === 'loading' ? (
+            <div className={`text-box ${improvedText ? 'text-box--improved' : ''} min-h-[100px]`}>
+               {status === 'loading' && !improvedText ? (
                  <div className="py-1">
                     <div className="skeleton w-full"></div>
                     <div className="skeleton w-[85%]"></div>
@@ -483,4 +576,3 @@ export default function TextImprovementPage() {
     </div>
   );
 }
-

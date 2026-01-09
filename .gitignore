@@ -133,3 +133,7 @@ dist-electron
 # Porcupine
 porcupine*
 *.ppn
+
+# Personal configuration (contains private data)
+*.personal.ts
+lib/personal-prompts.ts

@@ -169,11 +169,6 @@ async function createTranscriptionWindow(): Promise<BrowserWindow> {
 
   await window.loadURL(url);
 
-  // Open DevTools in development for debugging
-  if (isDevelopment) {
-    window.webContents.openDevTools({ mode: 'detach' });
-  }
-
   window.on("closed", () => {
     transcriptionWindow = null;
     mainWindow?.webContents.send("transcription:windowClosed");
@@ -212,19 +207,20 @@ async function createTextImprovementWindow(initialText?: string): Promise<Browse
 
   window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
-  // Build URL with optional initial text
-  let url = isDevelopment
+  // Build URL (no query params - we'll pass text via IPC)
+  const url = isDevelopment
     ? "http://localhost:3000/text-improvement"
     : `${nextServerUrl}/text-improvement`;
 
-  if (initialText) {
-    const encodedText = encodeURIComponent(initialText);
-    url += `?text=${encodedText}`;
-  }
-
-  console.log("[TextImprovement] Loading URL:", url.substring(0, 100));
+  console.log("[TextImprovement] Loading URL:", url);
   await window.loadURL(url);
   console.log("[TextImprovement] URL loaded successfully");
+
+  // Send initial text via IPC after window loads
+  if (initialText) {
+    console.log("[TextImprovement] Sending initial text via IPC, length:", initialText.length);
+    window.webContents.send("textImprovement:initialText", { text: initialText });
+  }
 
   if (isDevelopment) {
     // window.webContents.openDevTools({ mode: 'detach' });

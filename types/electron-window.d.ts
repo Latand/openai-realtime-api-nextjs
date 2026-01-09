@@ -106,6 +106,7 @@ declare global {
         saveSettings: (settings: any) => Promise<{ success: boolean; error?: string }>;
         loadSettings: () => Promise<{ success: boolean; settings: any; error?: string }>;
         resize: (width: number, height: number) => Promise<{ success: boolean }>;
+        onInitialText: (callback: (data: { text: string }) => void) => () => void;
         onWindowClosed: (callback: () => void) => () => void;
       };
     };

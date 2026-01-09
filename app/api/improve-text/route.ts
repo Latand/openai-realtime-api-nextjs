@@ -1,51 +1,64 @@
 import { NextResponse } from "next/server";
-import { STYLE_PROMPTS, ImprovementStyle } from "@/lib/text-improvement-prompts";
+import Anthropic from "@anthropic-ai/sdk";
+import { STYLE_PROMPTS, ImprovementStyle, LanguageOption, getLanguageInstruction } from "@/lib/text-improvement-prompts";
 
 export async function POST(req: Request) {
   try {
-    const { originalText, style, additionalInstructions } = await req.json();
+    const { originalText, style, language, additionalInstructions } = await req.json();
 
     if (!originalText) {
       return NextResponse.json({ error: "Missing originalText" }, { status: 400 });
     }
 
     const selectedStyle = (style as ImprovementStyle) || 'your-style';
-    const systemPrompt = STYLE_PROMPTS[selectedStyle] || STYLE_PROMPTS['your-style'];
+    const selectedLanguage = (language as LanguageOption) || 'auto';
+
+    let systemPrompt = STYLE_PROMPTS[selectedStyle] || STYLE_PROMPTS['your-style'];
+
+    // Append language instruction
+    systemPrompt += `\n\n${getLanguageInstruction(selectedLanguage)}`;
 
     let userPrompt = `Original text:\n"${originalText}"`;
     if (additionalInstructions) {
       userPrompt += `\n\nAdditional instructions:\n${additionalInstructions}`;
     }
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-5.2",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        temperature: 0.7,
-      }),
+    const anthropic = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY,
     });
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      return NextResponse.json({ error: errorData.error?.message || "OpenAI API error" }, { status: response.status });
-    }
+    const stream = await anthropic.messages.stream({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [
+        { role: "user", content: userPrompt }
+      ],
+      temperature: 0.7,
+    });
 
-    const data = await response.json();
-    const improvedText = data.choices[0]?.message?.content || "";
+    const encoder = new TextEncoder();
 
-    return NextResponse.json({ improvedText });
+    const readableStream = new ReadableStream({
+      async start(controller) {
+        try {
+          stream.on('text', (text) => {
+            controller.enqueue(encoder.encode(text));
+          });
+
+          await stream.finalMessage();
+          controller.close();
+        } catch (error) {
+          console.error("Streaming error:", error);
+          controller.error(error);
+        }
+      },
+    });
+
+    return new NextResponse(readableStream);
 
   } catch (error) {
     console.error("Text improvement error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
-

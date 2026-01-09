@@ -104,5 +104,10 @@ contextBridge.exposeInMainWorld("electron", {
       ipcRenderer.on("textImprovement:windowClosed", handler);
       return () => ipcRenderer.removeListener("textImprovement:windowClosed", handler);
     },
+    onInitialText: (callback: (data: { text: string }) => void) => {
+      const handler = (_: any, data: { text: string }) => callback(data);
+      ipcRenderer.on("textImprovement:initialText", handler);
+      return () => ipcRenderer.removeListener("textImprovement:initialText", handler);
+    },
   },
 });
