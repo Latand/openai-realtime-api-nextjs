@@ -94,7 +94,7 @@ contextBridge.exposeInMainWorld("electron", {
     },
   },
   textImprovement: {
-    openWindow: () => ipcRenderer.invoke("textImprovement:openWindow"),
+    openWindow: (initialText?: string) => ipcRenderer.invoke("textImprovement:openWindow", initialText),
     closeWindow: () => ipcRenderer.invoke("textImprovement:closeWindow"),
     saveSettings: (settings: any) => ipcRenderer.invoke("textImprovement:saveSettings", settings),
     loadSettings: () => ipcRenderer.invoke("textImprovement:loadSettings"),

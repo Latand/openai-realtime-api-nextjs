@@ -527,6 +527,8 @@ function AppContent() {
     }
 
     try {
+      let initialText: string | undefined;
+
       // If whisper transcription is active, stop it and use its text
       if (isWhisperRecording) {
         console.log("[TextImprovement] Stopping whisper transcription to capture text");
@@ -538,15 +540,14 @@ function AppContent() {
         const transcriptionResult = await stopWhisperRecording();
 
         if (transcriptionResult?.text) {
-          // Write the transcribed text to clipboard so the improvement window can read it
-          if (window.electron?.clipboard) {
-            await window.electron.clipboard.write(transcriptionResult.text);
-          }
+          initialText = transcriptionResult.text;
           toast.success("Transcription captured for improvement");
         }
       }
 
-      const result = await window.electron?.textImprovement?.openWindow?.();
+      // Open a new text improvement window (always creates new instance)
+      // Pass initialText directly if we have it from transcription
+      const result = await window.electron?.textImprovement?.openWindow?.(initialText);
       if (result?.success) {
         setIsTextImprovementOpen(true);
       }

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { Instrument_Serif, Geist_Mono } from "next/font/google";
 import { X, Copy, Check, RefreshCw, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
@@ -163,6 +164,7 @@ const styles = `
 `;
 
 export default function TextImprovementPage() {
+  const searchParams = useSearchParams();
   const [originalText, setOriginalText] = useState("");
   const [improvedText, setImprovedText] = useState("");
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -174,7 +176,7 @@ export default function TextImprovementPage() {
   const instructionsInputRef = useRef<HTMLInputElement>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Load initial state and clipboard
+  // Load initial state and text (from URL param or clipboard)
   useEffect(() => {
     const initialize = async () => {
       // Load saved style
@@ -185,13 +187,22 @@ export default function TextImprovementPage() {
         }
       }
 
-      // Read clipboard
+      // Check for initial text from URL parameter first (from transcription)
+      const urlText = searchParams.get('text');
+      if (urlText && urlText.trim().length > 0) {
+        const decodedText = decodeURIComponent(urlText).trim();
+        setOriginalText(decodedText);
+        // Trigger improvement immediately
+        improveText(decodedText, settingsStyleRef.current || 'your-style', "");
+        return;
+      }
+
+      // Fall back to clipboard
       if (window.electron?.clipboard) {
         const { text } = await window.electron.clipboard.readText();
         if (text && text.trim().length > 0) {
           setOriginalText(text.trim());
           // Trigger improvement immediately
-          // We need to use the local 'text' variable as state update might be async
           improveText(text.trim(), settingsStyleRef.current || 'your-style', "");
         } else {
           setOriginalText("");
@@ -215,7 +226,7 @@ export default function TextImprovementPage() {
     resizeObserver.observe(document.body);
 
     return () => resizeObserver.disconnect();
-  }, []);
+  }, [searchParams]);
 
   // Use ref to access latest style in async calls without dependency loop
   const settingsStyleRef = useRef(style);

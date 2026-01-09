@@ -26,7 +26,7 @@ const isDevelopment = !app.isPackaged;
 
 let mainWindow: BrowserWindow | null = null;
 let transcriptionWindow: BrowserWindow | null = null;
-let textImprovementWindow: BrowserWindow | null = null;
+const textImprovementWindows: Map<number, BrowserWindow> = new Map();
 let nextServer: Server | null = null;
 let nextServerUrl: string | null = null;
 
@@ -183,16 +183,20 @@ async function createTranscriptionWindow(): Promise<BrowserWindow> {
 }
 
 // Create text improvement window
-async function createTextImprovementWindow(): Promise<BrowserWindow> {
+async function createTextImprovementWindow(initialText?: string): Promise<BrowserWindow> {
   const { width: screenWidth } = screen.getPrimaryDisplay().workAreaSize;
   const windowWidth = 520;
   const windowHeight = 400;
 
+  // Offset each new window slightly so they don't stack exactly
+  const windowCount = textImprovementWindows.size;
+  const offset = windowCount * 30;
+
   const window = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
-    x: Math.floor((screenWidth - windowWidth) / 2),
-    y: 60,
+    x: Math.floor((screenWidth - windowWidth) / 2) + offset,
+    y: 60 + offset,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -208,9 +212,15 @@ async function createTextImprovementWindow(): Promise<BrowserWindow> {
 
   window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
-  const url = isDevelopment
+  // Build URL with optional initial text
+  let url = isDevelopment
     ? "http://localhost:3000/text-improvement"
     : `${nextServerUrl}/text-improvement`;
+
+  if (initialText) {
+    const encodedText = encodeURIComponent(initialText);
+    url += `?text=${encodedText}`;
+  }
 
   await window.loadURL(url);
 
@@ -218,9 +228,12 @@ async function createTextImprovementWindow(): Promise<BrowserWindow> {
     // window.webContents.openDevTools({ mode: 'detach' });
   }
 
+  const windowId = window.id;
+  textImprovementWindows.set(windowId, window);
+
   window.on("closed", () => {
-    textImprovementWindow = null;
-    mainWindow?.webContents.send("textImprovement:windowClosed");
+    textImprovementWindows.delete(windowId);
+    mainWindow?.webContents.send("textImprovement:windowClosed", { windowId });
   });
 
   return window;
@@ -277,25 +290,23 @@ app.on("ready", async () => {
   });
 
   // Text Improvement window handlers
-  ipcMain.handle("textImprovement:openWindow", async () => {
-    if (textImprovementWindow) {
-      textImprovementWindow.show();
-      textImprovementWindow.focus();
-      return { success: true, alreadyOpen: true };
-    }
+  ipcMain.handle("textImprovement:openWindow", async (_, initialText?: string) => {
     try {
-      textImprovementWindow = await createTextImprovementWindow();
-      return { success: true };
+      // Always create a new window
+      const window = await createTextImprovementWindow(initialText);
+      return { success: true, windowId: window.id };
     } catch (error) {
       console.error("Failed to create text improvement window:", error);
       return { success: false, error: String(error) };
     }
   });
 
-  ipcMain.handle("textImprovement:closeWindow", () => {
-    if (textImprovementWindow) {
-      textImprovementWindow.close();
-      textImprovementWindow = null;
+  ipcMain.handle("textImprovement:closeWindow", (event) => {
+    // Find and close the window that sent this message
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    if (senderWindow) {
+      textImprovementWindows.delete(senderWindow.id);
+      senderWindow.close();
     }
     return { success: true };
   });
@@ -321,9 +332,10 @@ app.on("ready", async () => {
     }
   });
 
-  ipcMain.handle("textImprovement:resize", (_, width: number, height: number) => {
-    if (textImprovementWindow) {
-      textImprovementWindow.setSize(width, height);
+  ipcMain.handle("textImprovement:resize", (event, width: number, height: number) => {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    if (senderWindow) {
+      senderWindow.setSize(width, height);
     }
     return { success: true };
   });

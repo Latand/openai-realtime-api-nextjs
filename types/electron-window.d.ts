@@ -101,7 +101,7 @@ declare global {
         onWindowClosed: (callback: () => void) => () => void;
       };
       textImprovement: {
-        openWindow: () => Promise<{ success: boolean; alreadyOpen?: boolean; error?: string }>;
+        openWindow: (initialText?: string) => Promise<{ success: boolean; windowId?: number; error?: string }>;
         closeWindow: () => Promise<{ success: boolean }>;
         saveSettings: (settings: any) => Promise<{ success: boolean; error?: string }>;
         loadSettings: () => Promise<{ success: boolean; settings: any; error?: string }>;
