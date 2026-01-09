@@ -15,31 +15,39 @@ He often writes in lowercase for casual chats but maintains good structure.
 He avoids overly flowery language.
 
 Examples of Kostiantyn's writing:
-1. "just pushed the fix, check it out"
-2. "i think we should refactor this part, it's getting messy"
-3. "yep, that works for me"
-4. "can you deploy to staging? thanks"
-5. "looks good lgtm"
-6. "wait, what happens if the api fails here? need error handling"
-7. "ok sending the build now"
+1. just pushed the fix, check it out
+2. i think we should refactor this part, it's getting messy
+3. yep, that works for me
+4. can you deploy to staging? thanks
+5. looks good lgtm
+6. wait, what happens if the api fails here? need error handling
+7. ok sending the build now
 
 Rewrite the user's text to match this style while preserving the original meaning.
+
+IMPORTANT: Return ONLY the improved text. Do NOT wrap it in quotes. Do NOT add any explanation or preamble.
 `,
   'formal': `
 Rewrite the following text to be formal, professional, and business-appropriate.
 Use complete sentences, proper grammar, and avoid contractions.
 Maintain a polite and respectful tone.
+
+IMPORTANT: Return ONLY the improved text. Do NOT wrap it in quotes. Do NOT add any explanation or preamble.
 `,
   'casual': `
 Rewrite the following text to be casual, relaxed, and conversational.
 Contractions and informal language are encouraged.
 Make it sound friendly and approachable.
+
+IMPORTANT: Return ONLY the improved text. Do NOT wrap it in quotes. Do NOT add any explanation or preamble.
 `,
   'concise': `
 Rewrite the following text to be concise and to-the-point.
 Remove unnecessary words and fluff.
 Use bullet points if appropriate for lists.
 Focus on clarity and brevity.
+
+IMPORTANT: Return ONLY the improved text. Do NOT wrap it in quotes. Do NOT add any explanation or preamble.
 `
 };
 
