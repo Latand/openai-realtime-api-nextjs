@@ -32,7 +32,7 @@ import { Settings, Mic, MessageSquare } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 
-import { CostMonitorModal } from "@/components/cost-monitor-modal";
+import { MinimalCostDisplay } from "@/components/minimal-cost-display";
 import {
   loadCompactsFromFile,
   formatCompactsForPrompt,
@@ -917,16 +917,40 @@ function AppContent() {
   }, []);
 
   return (
-    <main className="h-screen w-screen flex flex-col justify-center bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 overflow-hidden relative">
+    <main className="h-screen w-screen flex flex-col bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 overflow-hidden relative">
       {/* Main Content */}
-      <div className="flex flex-col items-center gap-6 max-w-md mx-auto w-full px-4 relative z-10">
-        {/* Settings Dialog Trigger - Top Right or nicely placed */}
-        <div className="absolute top-4 right-4 flex items-center gap-2">
-          <CostMonitorModal />
-          <ShortcutsHint />
+      <div className="flex flex-col items-center gap-4 max-w-md mx-auto w-full px-4 pt-4 pb-2 flex-1">
+        {/* Visualizer & Broadcast Button */}
+        <div className="w-full flex flex-col items-center justify-center py-4 relative flex-1">
+          {/* Visualizer Background */}
+          <div className="absolute inset-0 flex items-center justify-center opacity-30 pointer-events-none">
+             <AudioVisualizer
+                currentVolume={currentVolume}
+                isSessionActive={isSessionActive}
+                color={isSessionActive ? "#f59e0b" : "#64748b"}
+             />
+          </div>
+
+          <div className="z-10 flex items-center gap-3">
+            <BroadcastButton
+              isSessionActive={isSessionActive}
+              detected={Boolean(detected)}
+              onClick={onButtonClick}
+            />
+          </div>
+          <SessionTimer isActive={isSessionActive} />
+        </div>
+
+        {/* Action Buttons Row */}
+        <div className="flex items-center gap-2 w-full justify-center flex-wrap">
+          
+          {/* Settings Button */}
           <Dialog>
             <DialogTrigger asChild>
-              <button className="p-2 text-slate-400 hover:text-white bg-slate-800/50 rounded-lg hover:bg-slate-700/50 transition-colors">
+              <button 
+                className="group p-2.5 bg-slate-800/60 hover:bg-slate-700/80 border border-slate-600/40 hover:border-slate-500/60 text-slate-400 hover:text-white rounded-lg transition-all duration-200"
+                title="Settings"
+              >
                 <Settings className="w-5 h-5" />
               </button>
             </DialogTrigger>
@@ -967,31 +991,13 @@ function AppContent() {
               </div>
             </DialogContent>
           </Dialog>
-        </div>
 
-        {/* Visualizer & Broadcast Button */}
-        <div className="w-full flex flex-col items-center justify-center py-4 relative">
-          {/* Visualizer Background */}
-          <div className="absolute inset-0 flex items-center justify-center opacity-30 pointer-events-none">
-             <AudioVisualizer 
-                currentVolume={currentVolume} 
-                isSessionActive={isSessionActive} 
-                color={isSessionActive ? "#f59e0b" : "#64748b"}
-             />
-          </div>
+          {/* Shortcuts Hint */}
+          <ShortcutsHint />
 
-          <div className="z-10 w-full max-w-[200px] flex flex-col items-center gap-2">
-            <BroadcastButton
-              isSessionActive={isSessionActive}
-              detected={Boolean(detected)}
-              onClick={onButtonClick}
-            />
-            <SessionTimer isActive={isSessionActive} />
-          </div>
-        </div>
+          {/* Divider */}
+          <div className="w-px h-6 bg-slate-700/50 mx-1" />
 
-        {/* Action Buttons Row */}
-        <div className="flex items-center gap-2 w-full justify-center">
           {/* Transcript Button */}
           <button
             onClick={() => setIsTranscriptOpen(true)}
@@ -1146,6 +1152,12 @@ function AppContent() {
           </p>
         </div>
       </div>
+
+      {/* Cost Display - Top Left */}
+      <div className="fixed top-4 left-4 z-20">
+        <MinimalCostDisplay />
+      </div>
+
       <TranscriptWindow
         conversation={[...conversation, ...transcriptionEntries].sort(
           (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()

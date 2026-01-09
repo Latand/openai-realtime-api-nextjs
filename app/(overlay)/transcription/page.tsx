@@ -41,35 +41,21 @@ export default function TranscriptionPage() {
 
   // Listen for state updates (recording/processing)
   useEffect(() => {
-    // Check if onStateUpdate exists before using it
-    if (window.electron?.transcription?.onStateUpdate) {
-        const unsubscribe = window.electron.transcription.onStateUpdate(
-          (data: { isRecording: boolean; isProcessing: boolean; recordingDuration: number }) => {
-            console.log("[Transcription] Received state update:", data);
-            setIsRecording(data.isRecording);
-            setIsProcessing(data.isProcessing);
-            setRecordingDuration(data.recordingDuration);
-            
-            if (data.isProcessing) {
-              setProgress(0);
-            } else if (!data.isProcessing && data.recordingDuration > 0) {
-              // Processing complete - fill the bar if we were processing
-              setProgress(100);
-            }
-          }
-        );
-        return () => unsubscribe();
-    } else {
-        // Fallback to old listener if new one not available (shouldn't happen with updated preload)
-        console.warn("[Transcription] onStateUpdate not found, falling back to onProcessingState");
-        const unsubscribe = window.electron?.transcription?.onProcessingState?.(
-            (data: { isProcessing: boolean; recordingDuration: number }) => {
-              setIsProcessing(data.isProcessing);
-              setRecordingDuration(data.recordingDuration);
-            }
-        );
-        return () => unsubscribe?.();
-    }
+    const unsubscribe = window.electron?.transcription?.onStateUpdate(
+      (data: { isRecording: boolean; isProcessing: boolean; recordingDuration: number }) => {
+        console.log("[Transcription] Received state update:", data);
+        setIsRecording(data.isRecording);
+        setIsProcessing(data.isProcessing);
+        setRecordingDuration(data.recordingDuration);
+
+        if (data.isProcessing) {
+          setProgress(0);
+        } else if (!data.isProcessing && data.recordingDuration > 0) {
+          setProgress(100);
+        }
+      }
+    );
+    return () => unsubscribe?.();
   }, []);
 
   // Animate progress bar when processing

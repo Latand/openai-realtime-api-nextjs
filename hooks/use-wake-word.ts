@@ -72,8 +72,7 @@ export function useWakeWord(config: WakeWordConfig) {
       console.log("[useWakeWord] Device changed, restarting with new device:", config.deviceId);
       currentDeviceIdRef.current = config.deviceId;
       stop().then(() => {
-        const startOptions = config.deviceId ? { deviceId: config.deviceId } : undefined;
-        return start(startOptions);
+        return start();
       }).then(() => {
         console.log("[useWakeWord] Restarted with new device");
       }).catch(err => {
@@ -85,8 +84,7 @@ export function useWakeWord(config: WakeWordConfig) {
     if (shouldListen && !isListening) {
       console.log("[useWakeWord] Starting with deviceId:", config.deviceId);
       currentDeviceIdRef.current = config.deviceId;
-      const startOptions = config.deviceId ? { deviceId: config.deviceId } : undefined;
-      start(startOptions).then(() => {
+      start().then(() => {
         console.log("[useWakeWord] start() resolved");
         setIsReady(true);
       }).catch(err => {

@@ -280,9 +280,9 @@ app.on("ready", async () => {
     return { success: true };
   });
 
-  ipcMain.handle("transcription:updateProcessingState", (_, isProcessing: boolean, recordingDuration: number) => {
+  ipcMain.handle("transcription:updateState", (_, state: { isRecording: boolean; isProcessing: boolean; recordingDuration: number }) => {
     if (transcriptionWindow) {
-      transcriptionWindow.webContents.send("transcription:processingState", { isProcessing, recordingDuration });
+      transcriptionWindow.webContents.send("transcription:stateUpdate", state);
     }
     return { success: true };
   });

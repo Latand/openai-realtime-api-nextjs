@@ -11,7 +11,10 @@ export function ShortcutsHint() {
   return (
     <HoverCard>
       <HoverCardTrigger asChild>
-        <button className="p-2 text-slate-500 hover:text-slate-300 transition-colors">
+        <button 
+          className="group p-2.5 bg-slate-800/60 hover:bg-slate-700/80 border border-slate-600/40 hover:border-slate-500/60 text-slate-400 hover:text-white rounded-lg transition-all duration-200"
+          title="Keyboard Shortcuts"
+        >
           <Keyboard className="w-5 h-5" />
         </button>
       </HoverCardTrigger>
@@ -41,4 +44,3 @@ export function ShortcutsHint() {
     </HoverCard>
   );
 }
-
