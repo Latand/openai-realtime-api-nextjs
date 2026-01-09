@@ -24,16 +24,11 @@ export default function RootLayout({
     <html lang="en" className="dark" suppressHydrationWarning>
       <body
         className={cn(
-          "min-h-dvh bg-black font-sans antialiased",
+          "h-screen w-screen overflow-hidden bg-transparent font-sans antialiased",
           geistSans.variable
         )}
       >
-        <div className="relative flex min-h-dvh flex-col bg-black items-center">
-          <main className="mt-8 flex flex-1 justify-center items-start w-full">
-            {children}
-          </main>
-          <DevToolsButton />
-        </div>
+        {children}
         <Toaster theme="dark" />
       </body>
     </html>

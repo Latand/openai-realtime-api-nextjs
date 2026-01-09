@@ -104,11 +104,13 @@ declare global {
       transcription: {
         openWindow: () => Promise<{ success: boolean; alreadyOpen?: boolean; error?: string }>;
         closeWindow: () => Promise<{ success: boolean }>;
+        stop: () => Promise<{ success: boolean }>;
         updateText: (text: string, interim: string) => Promise<{ success: boolean }>;
-        updateProcessingState: (isProcessing: boolean, recordingDuration: number) => Promise<{ success: boolean }>;
+        updateState: (state: { isRecording: boolean; isProcessing: boolean; recordingDuration: number }) => Promise<{ success: boolean }>;
         onTextUpdate: (callback: (data: { text: string; interim: string }) => void) => () => void;
-        onProcessingState: (callback: (data: { isProcessing: boolean; recordingDuration: number }) => void) => () => void;
+        onStateUpdate: (callback: (data: { isRecording: boolean; isProcessing: boolean; recordingDuration: number }) => void) => () => void;
         onWindowClosed: (callback: () => void) => () => void;
+        onStop: (callback: () => void) => () => void;
       };
       textImprovement: {
         openWindow: (initialText?: string) => Promise<{ success: boolean; windowId?: number; error?: string }>;

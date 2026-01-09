@@ -9,6 +9,7 @@ interface UseRealtimeTranscriptionReturn {
   transcription: string;
   interimTranscription: string;
   error: string | null;
+  currentVolume: number;
   start: () => Promise<void>;
   stop: () => void;
   stopAndGetText: () => Promise<string>;
@@ -27,6 +28,7 @@ export default function useRealtimeTranscription(
   const [transcription, setTranscription] = useState("");
   const [interimTranscription, setInterimTranscription] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [currentVolume, setCurrentVolume] = useState(0);
 
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
@@ -34,6 +36,11 @@ export default function useRealtimeTranscription(
   const isStoppingRef = useRef(false);
   const transcriptionRef = useRef<string>("");
   const interimRef = useRef<string>("");
+  
+  // Volume analysis
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const volumeIntervalRef = useRef<number | null>(null);
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -43,6 +50,15 @@ export default function useRealtimeTranscription(
   useEffect(() => {
     interimRef.current = interimTranscription;
   }, [interimTranscription]);
+
+  // Sync state with overlay window
+  useEffect(() => {
+    window.electron?.transcription?.updateState?.({
+      isRecording: isActive,
+      isProcessing: false, // Realtime is always "recording" until stopped, no post-processing phase like Whisper
+      recordingDuration: 0 // We don't track duration for Realtime same way as Whisper
+    });
+  }, [isActive]);
 
   /**
    * Fetch ephemeral token from the session endpoint
@@ -197,6 +213,30 @@ export default function useRealtimeTranscription(
       });
       audioStreamRef.current = stream;
 
+      // Setup audio analysis for volume
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      const audioCtx = new AudioContextClass();
+      audioContextRef.current = audioCtx;
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
+      if (volumeIntervalRef.current) clearInterval(volumeIntervalRef.current);
+      volumeIntervalRef.current = window.setInterval(() => {
+        if (analyserRef.current) {
+          const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+          analyserRef.current.getByteTimeDomainData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < dataArray.length; i++) {
+            const float = (dataArray[i] - 128) / 128;
+            sum += float * float;
+          }
+          setCurrentVolume(Math.sqrt(sum / dataArray.length));
+        }
+      }, 100);
+
       // Get ephemeral token
       const ephemeralToken = await getEphemeralToken();
 
@@ -305,6 +345,17 @@ export default function useRealtimeTranscription(
       audioStreamRef.current = null;
     }
 
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(console.error);
+      audioContextRef.current = null;
+    }
+    
+    if (volumeIntervalRef.current) {
+      clearInterval(volumeIntervalRef.current);
+      volumeIntervalRef.current = null;
+    }
+    setCurrentVolume(0);
+
     setIsActive(false);
     setIsConnecting(false);
     setInterimTranscription("");
@@ -364,6 +415,7 @@ export default function useRealtimeTranscription(
     transcription,
     interimTranscription,
     error,
+    currentVolume,
     start,
     stop,
     stopAndGetText,

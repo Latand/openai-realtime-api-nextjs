@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { toast } from "sonner";
+import { Wand2 } from "lucide-react";
+import { AudioVisualizer } from "@/components/audio-visualizer";
 
 interface FloatingTranscriptionProps {
   isActive: boolean;
@@ -9,9 +11,11 @@ interface FloatingTranscriptionProps {
   transcription: string;
   interimTranscription: string;
   error: string | null;
+  currentVolume?: number; // Added optional volume prop
   onStop: () => void;
   onClear: () => void;
   onCopy: () => void;
+  onImprove?: (text: string) => Promise<string | void>;
 }
 
 export function FloatingTranscription({
@@ -20,13 +24,18 @@ export function FloatingTranscription({
   transcription,
   interimTranscription,
   error,
+  currentVolume = 0,
   onStop,
   onClear,
   onCopy,
+  onImprove,
 }: FloatingTranscriptionProps) {
   const [position, setPosition] = useState({ x: 20, y: 20 });
   const [isDragging, setIsDragging] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
+  const [isImproving, setIsImproving] = useState(false);
+  const [improvedText, setImprovedText] = useState<string | null>(null);
+  
   const dragOffset = useRef({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
@@ -36,7 +45,7 @@ export function FloatingTranscription({
     if (textRef.current) {
       textRef.current.scrollTop = textRef.current.scrollHeight;
     }
-  }, [transcription, interimTranscription]);
+  }, [transcription, interimTranscription, improvedText]);
 
   // Handle drag start
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -77,13 +86,42 @@ export function FloatingTranscription({
 
   // Copy and close
   const handleCopyAndClose = useCallback(() => {
-    onCopy();
+    const textToCopy = improvedText || transcription;
+    if (textToCopy) {
+      if (window.electron?.clipboard) {
+        window.electron.clipboard.write(textToCopy);
+      } else {
+        navigator.clipboard.writeText(textToCopy);
+      }
+      toast.success("Copied to clipboard");
+    }
     onStop();
-  }, [onCopy, onStop]);
+  }, [onCopy, onStop, improvedText, transcription]);
 
-  if (!isActive && !isConnecting) return null;
+  const handleImprove = async () => {
+    if (!onImprove || !transcription) return;
+    
+    setIsImproving(true);
+    try {
+      // If we get a string back, update local state
+      const result = await onImprove(transcription);
+      if (typeof result === 'string') {
+        setImprovedText(result);
+        toast.success("Text improved");
+      }
+    } catch (err) {
+      console.error("Improvement failed:", err);
+      toast.error("Failed to improve text");
+    } finally {
+      setIsImproving(false);
+    }
+  };
 
-  const displayText = transcription + (interimTranscription ? ` ${interimTranscription}` : "");
+  // Only render if active OR if we have content (persistence mode)
+  // This allows the window to stay open after recording stops so user can read/copy/improve
+  if (!isActive && !isConnecting && !transcription && !improvedText && !error) return null;
+
+  const displayText = improvedText || (transcription + (interimTranscription ? ` ${interimTranscription}` : ""));
 
   return (
     <div
@@ -102,24 +140,48 @@ export function FloatingTranscription({
         `}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-purple-600/20 to-pink-600/20 border-b border-slate-700/50">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-purple-600/20 to-pink-600/20 border-b border-slate-700/50 relative overflow-hidden">
+          
+          {/* Visualizer Background (only when active) */}
+          {isActive && (
+            <div className="absolute inset-0 opacity-20 pointer-events-none">
+              <AudioVisualizer 
+                currentVolume={currentVolume} 
+                isSessionActive={true} 
+                color="#a855f7" // Purple
+              />
+            </div>
+          )}
+
+          <div className="flex items-center gap-3 relative z-10">
             {/* Recording indicator */}
             <div className="relative">
-              <div className={`w-3 h-3 rounded-full ${isConnecting ? "bg-yellow-500" : "bg-red-500"}`} />
-              {isActive && (
+              {/* Only show "red" and ping when ACTIVELY recording */}
+              <div 
+                className={`w-3 h-3 rounded-full transition-colors duration-300
+                  ${isConnecting ? "bg-yellow-500" : isActive ? "bg-red-500" : "bg-slate-500"}
+                `} 
+              />
+              {/* Ping animation ONLY when active */}
+              {isActive && !isConnecting && (
                 <div className="absolute inset-0 w-3 h-3 rounded-full bg-red-500 animate-ping opacity-75" />
               )}
             </div>
             {!isMinimized && (
               <span className="text-sm font-medium text-slate-200">
-                {isConnecting ? "Connecting..." : "Live Transcription"}
+                {isConnecting 
+                  ? "Connecting..." 
+                  : isActive 
+                    ? "Live Transcription" 
+                    : improvedText 
+                      ? "Improved Text" 
+                      : "Transcription Paused"}
               </span>
             )}
           </div>
 
           {!isMinimized && (
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 relative z-10">
               <button
                 onClick={() => setIsMinimized(true)}
                 className="p-1.5 hover:bg-slate-700/50 rounded-lg transition-colors"
@@ -129,15 +191,29 @@ export function FloatingTranscription({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
                 </svg>
               </button>
-              <button
-                onClick={onStop}
-                className="p-1.5 hover:bg-red-500/20 rounded-lg transition-colors"
-                title="Stop"
-              >
-                <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              {isActive && (
+                <button
+                  onClick={onStop}
+                  className="p-1.5 hover:bg-red-500/20 rounded-lg transition-colors"
+                  title="Stop"
+                >
+                  <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+              {/* Close button when not active (instead of Stop) */}
+              {!isActive && (
+                <button
+                  onClick={onStop} // onStop usually handles closing logic or clearing active state
+                  className="p-1.5 hover:bg-slate-700/50 rounded-lg transition-colors"
+                  title="Close"
+                >
+                  <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -157,43 +233,64 @@ export function FloatingTranscription({
             {/* Transcription text area */}
             <div
               ref={textRef}
-              className="p-4 h-48 overflow-y-auto text-slate-100 text-sm leading-relaxed"
+              className="p-4 h-48 overflow-y-auto text-slate-100 text-sm leading-relaxed relative"
             >
+              {/* Background Equalizer Effect (optional secondary) */}
+              
               {error ? (
                 <p className="text-red-400">{error}</p>
               ) : displayText ? (
-                <p>
-                  {transcription}
-                  {interimTranscription && (
-                    <span className="text-slate-400 italic">{interimTranscription}</span>
+                <p className={improvedText ? "text-emerald-300" : ""}>
+                  {displayText}
+                  {!improvedText && interimTranscription && (
+                    <span className="text-slate-400 italic">...</span>
                   )}
                 </p>
               ) : (
                 <p className="text-slate-500 italic">
-                  {isConnecting ? "Establishing connection..." : "Start speaking..."}
+                  {isConnecting ? "Establishing connection..." : isActive ? "Start speaking..." : "No transcription."}
                 </p>
               )}
             </div>
 
             {/* Actions */}
             <div className="flex items-center gap-2 px-4 py-3 bg-slate-800/50 border-t border-slate-700/50">
+              {onImprove && !improvedText && (
+                <button
+                  onClick={handleImprove}
+                  disabled={!transcription || isImproving}
+                  className={`
+                    p-2 rounded-lg transition-all
+                    ${isImproving 
+                      ? "bg-purple-500/20 text-purple-400 cursor-wait animate-pulse" 
+                      : "bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 hover:text-purple-300 border border-purple-500/30"}
+                  `}
+                  title="Instant Improve (Magic Wand)"
+                >
+                  <Wand2 className={`w-4 h-4 ${isImproving ? "animate-spin" : ""}`} />
+                </button>
+              )}
+              
               <button
-                onClick={onClear}
-                disabled={!transcription}
+                onClick={() => {
+                   setImprovedText(null);
+                   onClear();
+                }}
+                disabled={!transcription && !improvedText}
                 className="flex-1 px-3 py-2 text-xs font-medium text-slate-300 bg-slate-700/50 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
               >
                 Clear
               </button>
               <button
                 onClick={onCopy}
-                disabled={!transcription}
+                disabled={!transcription && !improvedText}
                 className="flex-1 px-3 py-2 text-xs font-medium text-slate-300 bg-slate-700/50 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
               >
                 Copy
               </button>
               <button
                 onClick={handleCopyAndClose}
-                disabled={!transcription}
+                disabled={!transcription && !improvedText}
                 className="flex-1 px-3 py-2 text-xs font-medium text-white bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-all shadow-lg shadow-purple-500/25"
               >
                 Copy & Close

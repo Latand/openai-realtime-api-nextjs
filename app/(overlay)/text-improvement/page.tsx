@@ -6,6 +6,7 @@ import { X, Copy, Check, RefreshCw, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { IMPROVEMENT_STYLES, ImprovementStyle, LANGUAGE_OPTIONS, LanguageOption } from "@/lib/text-improvement-prompts";
 import { playSound } from "@/lib/tools";
+import { addCostLog, calculateChatCost } from "@/lib/cost-tracker";
 
 const instrumentSerif = Instrument_Serif({
   weight: "400",
@@ -295,6 +296,31 @@ export default function TextImprovementPage() {
         accumulatedText += chunk;
         setImprovedText(accumulatedText);
       }
+
+      // Calculate and log estimated cost
+      const inputLength = (text.length || 0) + (currentInstructions?.length || 0) + 800; // +800 for system prompt approx
+      const outputLength = accumulatedText.length;
+      
+      const inputTokens = Math.ceil(inputLength / 4);
+      const outputTokens = Math.ceil(outputLength / 4);
+      
+      const cost = calculateChatCost('claude-sonnet-4-20250514', {
+          prompt_tokens: inputTokens,
+          completion_tokens: outputTokens
+      });
+                   
+      addCostLog({
+          model: 'claude-sonnet-4-20250514',
+          type: 'text_out',
+          tokens: inputTokens + outputTokens,
+          cost,
+          metadata: { estimated: true, inputLen: inputLength, outputLen: outputLength }
+      }).catch(e => console.error("Failed to log cost:", e));
+
+      toast.success(`Text improved ($${cost.toFixed(4)})`, {
+          description: `${inputTokens + outputTokens} tokens used`,
+          duration: 4000
+      });
 
       setStatus('success');
 

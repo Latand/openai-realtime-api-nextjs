@@ -10,6 +10,7 @@ import { TwitterIcon, StarIcon } from "lucide-react";
 import { motion } from "framer-motion";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { useTranslations } from "@/components/translations-context";
+import { CostMonitorModal } from "@/components/cost-monitor-modal";
 
 export function Header() {
   const { t } = useTranslations()
@@ -52,6 +53,7 @@ export function Header() {
           transition={{ delay: 0.1 }}
           className="flex gap-3 items-center justify-end ml-auto"
         >
+          <CostMonitorModal />
           <LanguageSwitcher />
           <Link
             href={siteConfig.links.github}

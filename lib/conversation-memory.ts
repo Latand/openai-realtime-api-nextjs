@@ -1,5 +1,6 @@
 import { Conversation } from "./conversations";
 import { en } from "./translations/en";
+import { addCostLog, calculateChatCost } from "./cost-tracker";
 
 const MAX_COMPACTS = 5;
 
@@ -307,7 +308,26 @@ export async function compactAndSaveConversation(
       return null;
     }
 
-    const compact = (await response.json()) as ConversationCompact;
+    const data = await response.json();
+    const compact = data as ConversationCompact;
+
+    if (data.usage) {
+      const usage = data.usage;
+      const cost = calculateChatCost('gpt-5.1-chat-latest', {
+          prompt_tokens: usage.prompt_tokens || 0,
+          completion_tokens: usage.completion_tokens || 0,
+          prompt_tokens_details: usage.prompt_tokens_details
+      });
+
+      addCostLog({
+        model: 'gpt-5.1-chat-latest',
+        type: 'text_out',
+        tokens: usage.total_tokens,
+        cost,
+        metadata: usage
+      }).catch(e => console.error("[Memory] Failed to log cost:", e));
+    }
+
     saveCompact(compact);
     console.log("Conversation compacted and saved:", compact.summary.slice(0, 100));
     return compact;

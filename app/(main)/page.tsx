@@ -12,14 +12,27 @@ import { MicrophoneSelector } from "@/components/microphone-select";
 import { VoiceSelector } from "@/components/voice-select";
 import { TranscriptWindow } from "@/components/transcript-window";
 import { SummariesWindow } from "@/components/summaries-window";
-import { FloatingTranscription } from "@/components/floating-transcription";
 import { AudioVisualizer } from "@/components/audio-visualizer";
+import { SessionTimer } from "@/components/session-timer";
+import { ShortcutsHint } from "@/components/shortcuts-hint";
+import { ChatInput } from "@/components/chat-input";
 import { tools } from "@/lib/tools";
 import { playSound } from "@/lib/tools";
 import { Conversation } from "@/lib/conversations";
 import { v4 as uuidv4 } from "uuid";
 import { toast } from "sonner";
-import { IMPROVEMENT_STYLES, LanguageOption } from "@/lib/text-improvement-prompts";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Settings, Mic, MessageSquare } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+
+import { CostMonitorModal } from "@/components/cost-monitor-modal";
 import {
   loadCompactsFromFile,
   formatCompactsForPrompt,
@@ -288,30 +301,6 @@ function AppContent() {
     loadMemory();
   }, [loadMemory]);
 
-  // Load app settings (microphone, etc.) on mount
-  useEffect(() => {
-    const loadSettings = async () => {
-      if (window.electron?.settings) {
-        const { settings } = await window.electron.settings.load();
-        if (settings?.selectedMicrophoneId) {
-          debug("[Settings] Loaded microphone:", settings.selectedMicrophoneId);
-          setSelectedMicrophoneId(settings.selectedMicrophoneId as string);
-        }
-        setMicrophoneLoaded(true);
-      } else {
-        setMicrophoneLoaded(true);
-      }
-    };
-    loadSettings();
-  }, []);
-
-  // Save microphone preference when it changes (but only after initial load)
-  useEffect(() => {
-    if (!microphoneLoaded || !selectedMicrophoneId) return;
-    debug("[Settings] Saving microphone:", selectedMicrophoneId);
-    window.electron?.settings?.save({ selectedMicrophoneId });
-  }, [selectedMicrophoneId, microphoneLoaded]);
-
   debug("AppContent initialized with voice:", voice);
 
   const toolsFunctions = useToolsFunctions();
@@ -432,6 +421,25 @@ function AppContent() {
     return () => unsubscribe?.();
   }, [isTranscribing, stopTranscription]);
 
+  // Listen for transcription stop event from IPC
+  useEffect(() => {
+    const unsubscribe = window.electron?.transcription?.onStop?.(() => {
+      console.log("[Transcription] Stop command received from IPC");
+      if (isTranscribing) {
+        stopTranscription();
+      }
+      if (isWhisperRecording) {
+        // We can't await the result here easily, but we can stop recording
+        stopWhisperRecording().then(result => {
+           if (result?.text) {
+             window.electron?.transcription?.updateText?.(result.text, "");
+           }
+        });
+      }
+    });
+    return () => unsubscribe?.();
+  }, [isTranscribing, stopTranscription, isWhisperRecording, stopWhisperRecording]);
+
   // Listen for text improvement window closed
   useEffect(() => {
     const unsubscribe = window.electron?.textImprovement?.onWindowClosed?.(() => {
@@ -460,15 +468,12 @@ function AppContent() {
       // Send processing state BEFORE awaiting the result
       console.log("[Whisper] Sending processing state, duration:", recordingDuration);
       await window.electron?.transcription?.updateText?.("", "");
-      const processingResult = await window.electron?.transcription?.updateProcessingState?.(true, recordingDuration);
-      console.log("[Whisper] Processing state sent, result:", processingResult);
-
+      // With new state sync, we don't need updateProcessingState explicitly if hooks handle it
+      // But updateProcessingState handles the duration logic in the main process which then sends to window
+      // Actually we are syncing state from hooks now.
+      
       // Stop recording and transcribe (this awaits the API call)
       const result = await stopWhisperRecording();
-
-      // Send completion state
-      console.log("[Whisper] Sending completion state");
-      await window.electron?.transcription?.updateProcessingState?.(false, 0);
 
       if (result?.text) {
         // Copy to clipboard
@@ -535,8 +540,8 @@ function AppContent() {
           console.error("Failed to copy transcription:", err);
         }
       }
-
-      await window.electron?.transcription?.closeWindow?.();
+      // Don't close the window automatically so user can review/improve
+      // await window.electron?.transcription?.closeWindow?.();
     } else {
       // Clear previous transcription before starting new session
       clearTranscription();
@@ -549,50 +554,6 @@ function AppContent() {
       }
     }
   }, [isSessionActive, isTranscribing, isTranscribingConnecting, isWhisperRecording, isWhisperProcessing, startTranscription, stopTranscriptionAndGetText, clearTranscription]);
-
-  // Instant improve function for magic wand
-  const handleImproveTranscription = useCallback(async (text: string): Promise<string> => {
-    if (!text) return "";
-    
-    // Default to 'your-style' (personal Telegram style) and 'auto' language
-    const currentStyle = 'your-style';
-    const currentLanguage = 'auto';
-    
-    try {
-      const response = await fetch('/api/improve-text', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          originalText: text,
-          style: currentStyle,
-          language: currentLanguage,
-          additionalInstructions: ""
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to improve text');
-      }
-
-      if (!response.body) throw new Error("No response body");
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let accumulatedText = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        accumulatedText += decoder.decode(value, { stream: true });
-      }
-      
-      return accumulatedText;
-    } catch (err) {
-      console.error("Failed to improve transcription:", err);
-      toast.error("Failed to improve text");
-      throw err;
-    }
-  }, []);
 
   // Handle text improvement toggle (Ctrl+Shift+G)
   const handleTextImprovementToggle = useCallback(async () => {
@@ -640,34 +601,6 @@ function AppContent() {
       toast.error("Failed to open text improvement window");
     }
   }, [isSessionActive, isWhisperRecording, stopWhisperRecording]);
-
-  // Handle copying transcription to clipboard
-  const handleCopyTranscription = useCallback(async () => {
-    if (!realtimeTranscription) return;
-
-    try {
-      if (window.electron?.clipboard) {
-        await window.electron.clipboard.write(realtimeTranscription);
-      } else {
-        await navigator.clipboard.writeText(realtimeTranscription);
-      }
-      toast.success("Transcription copied to clipboard");
-
-      // Add transcription entry to conversation display
-      const entry: Conversation = {
-        id: uuidv4(),
-        role: "transcription",
-        text: realtimeTranscription,
-        timestamp: new Date().toISOString(),
-        isFinal: true,
-        status: "final",
-      };
-      setTranscriptionEntries((prev) => [...prev, entry]);
-    } catch (err) {
-      console.error("Failed to copy transcription:", err);
-      toast.error("Failed to copy to clipboard");
-    }
-  }, [realtimeTranscription]);
 
   // Global shortcut listeners
   useEffect(() => {
@@ -984,23 +917,56 @@ function AppContent() {
   }, []);
 
   return (
-    <main className="h-full flex flex-col justify-center p-4 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
+    <main className="h-screen w-screen flex flex-col justify-center bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 overflow-hidden relative">
       {/* Main Content */}
-      <div className="flex flex-col items-center gap-6 max-w-md mx-auto w-full">
-        {/* Settings Area (Microphone, Voice) */}
-        <div className="w-full space-y-3 bg-slate-900/50 p-4 rounded-xl border border-slate-800/50 backdrop-blur-sm">
-          <MicrophoneSelector
-            value={selectedMicrophoneId}
-            onValueChange={setSelectedMicrophoneId}
-            disabled={isSessionActive}
-            settingsLoaded={microphoneLoaded}
-          />
-          <VoiceSelector
-            value={voice}
-            onValueChange={setVoice}
-          />
-          {/* StatusDisplay uses toasts, no visual element */}
-          <StatusDisplay status={status} />
+      <div className="flex flex-col items-center gap-6 max-w-md mx-auto w-full px-4 relative z-10">
+        {/* Settings Dialog Trigger - Top Right or nicely placed */}
+        <div className="absolute top-4 right-4 flex items-center gap-2">
+          <CostMonitorModal />
+          <ShortcutsHint />
+          <Dialog>
+            <DialogTrigger asChild>
+              <button className="p-2 text-slate-400 hover:text-white bg-slate-800/50 rounded-lg hover:bg-slate-700/50 transition-colors">
+                <Settings className="w-5 h-5" />
+              </button>
+            </DialogTrigger>
+            <DialogContent className="bg-slate-900 border-slate-800 text-slate-100 sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle>Settings</DialogTitle>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="space-y-4">
+                  <MicrophoneSelector
+                    value={selectedMicrophoneId}
+                    onValueChange={setSelectedMicrophoneId}
+                    disabled={isSessionActive}
+                  />
+                  <VoiceSelector
+                    value={voice}
+                    onValueChange={setVoice}
+                  />
+                  <div className="flex items-center justify-between space-x-2 bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
+                    <Label htmlFor="wake-word" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex flex-col gap-1">
+                      <span>Wake Word</span>
+                      <span className="text-xs font-normal text-slate-400">Listen for "Hi Celestial"</span>
+                    </Label>
+                    <Switch
+                      id="wake-word"
+                      checked={autoWakeWordEnabled}
+                      onCheckedChange={(checked) => {
+                        setAutoWakeWordEnabled(checked);
+                        if (!checked) {
+                          setManualStop(true);
+                        } else {
+                          setManualStop(false);
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
 
         {/* Visualizer & Broadcast Button */}
@@ -1014,12 +980,13 @@ function AppContent() {
              />
           </div>
 
-          <div className="z-10 w-full max-w-[200px]">
+          <div className="z-10 w-full max-w-[200px] flex flex-col items-center gap-2">
             <BroadcastButton
               isSessionActive={isSessionActive}
               detected={Boolean(detected)}
               onClick={onButtonClick}
             />
+            <SessionTimer isActive={isSessionActive} />
           </div>
         </div>
 
@@ -1130,6 +1097,14 @@ function AppContent() {
           </button>
         </div>
 
+        {/* Chat Input */}
+        <div className="w-full">
+          <ChatInput
+            onSendMessage={sendTextMessage}
+            disabled={!isSessionActive}
+          />
+        </div>
+
         {/* Wake Word Status - compact */}
         <div className="text-center mt-2">
           {wakeWordEnabled && wakeError && !wakeListening && !wakeReady && (
@@ -1200,19 +1175,6 @@ function AppContent() {
         onSaveSystemPrompt={handleSaveSystemPrompt}
         onResetSystemPrompt={handleResetSystemPrompt}
         onRefresh={loadMemory}
-      />
-      {/* Floating Transcription Window for Real-time Mode */}
-      <FloatingTranscription
-        isActive={isTranscribing}
-        isConnecting={isTranscribingConnecting}
-        transcription={realtimeTranscription}
-        interimTranscription={interimTranscription}
-        error={transcriptionError}
-        currentVolume={transcriptionVolume}
-        onStop={stopTranscription}
-        onClear={clearTranscription}
-        onCopy={handleCopyTranscription}
-        onImprove={handleImproveTranscription}
       />
     </main>
   );

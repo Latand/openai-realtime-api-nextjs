@@ -72,6 +72,7 @@ Output format: A single paragraph summary. Be concise but preserve critical cont
 
     const data = await response.json();
     const summary = data.choices?.[0]?.message?.content || "";
+    const usage = data.usage;
 
     // Extract topics from the conversation
     const topics = extractTopics(messages);
@@ -80,6 +81,7 @@ Output format: A single paragraph summary. Be concise but preserve critical cont
       {
         summary,
         topics,
+        usage,
         timestamp: new Date().toISOString(),
         messageCount: messages.length,
       },

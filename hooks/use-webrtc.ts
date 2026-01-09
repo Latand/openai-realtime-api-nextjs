@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 import { Conversation } from "@/lib/conversations";
 import { useTranslations } from "@/components/translations-context";
 import { playSound } from "@/lib/tools";
+import { addCostLog, calculateRealtimeCost } from "@/lib/cost-tracker";
 
 declare global {
   interface Window {
@@ -378,6 +379,20 @@ export default function useWebRTCAudioSession(
             }
             return updated;
           });
+          break;
+        }
+        case "response.done": {
+          const usage = msg.response?.usage;
+          if (usage) {
+            const cost = calculateRealtimeCost(usage);
+            addCostLog({
+              model: "gpt-realtime",
+              type: "unknown", 
+              tokens: usage.total_tokens,
+              cost,
+              metadata: usage
+            }).catch(e => console.error("Failed to log cost:", e));
+          }
           break;
         }
         case "response.function_call_arguments.done": {

@@ -78,24 +78,30 @@ contextBridge.exposeInMainWorld("electron", {
   transcription: {
     openWindow: () => ipcRenderer.invoke("transcription:openWindow"),
     closeWindow: () => ipcRenderer.invoke("transcription:closeWindow"),
+    stop: () => ipcRenderer.invoke("transcription:stop"),
     updateText: (text: string, interim: string) =>
       ipcRenderer.invoke("transcription:updateText", text, interim),
-    updateProcessingState: (isProcessing: boolean, recordingDuration: number) =>
-      ipcRenderer.invoke("transcription:updateProcessingState", isProcessing, recordingDuration),
+    updateState: (state: { isRecording: boolean; isProcessing: boolean; recordingDuration: number }) =>
+      ipcRenderer.invoke("transcription:updateState", state),
     onTextUpdate: (callback: (data: { text: string; interim: string }) => void) => {
       const handler = (_event: IpcRendererEvent, data: { text: string; interim: string }) => callback(data);
       ipcRenderer.on("transcription:textUpdate", handler);
       return () => ipcRenderer.removeListener("transcription:textUpdate", handler);
     },
-    onProcessingState: (callback: (data: { isProcessing: boolean; recordingDuration: number }) => void) => {
-      const handler = (_event: IpcRendererEvent, data: { isProcessing: boolean; recordingDuration: number }) => callback(data);
-      ipcRenderer.on("transcription:processingState", handler);
-      return () => ipcRenderer.removeListener("transcription:processingState", handler);
+    onStateUpdate: (callback: (data: { isRecording: boolean; isProcessing: boolean; recordingDuration: number }) => void) => {
+      const handler = (_event: IpcRendererEvent, data: { isRecording: boolean; isProcessing: boolean; recordingDuration: number }) => callback(data);
+      ipcRenderer.on("transcription:stateUpdate", handler);
+      return () => ipcRenderer.removeListener("transcription:stateUpdate", handler);
     },
     onWindowClosed: (callback: () => void) => {
       const handler = () => callback();
       ipcRenderer.on("transcription:windowClosed", handler);
       return () => ipcRenderer.removeListener("transcription:windowClosed", handler);
+    },
+    onStop: (callback: () => void) => {
+      const handler = () => callback();
+      ipcRenderer.on("transcription:stop", handler);
+      return () => ipcRenderer.removeListener("transcription:stop", handler);
     },
   },
   textImprovement: {

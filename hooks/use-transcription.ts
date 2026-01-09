@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { playSound } from "@/lib/tools";
+import { addCostLog, PRICING } from "@/lib/cost-tracker";
 import {
   savePendingTranscription,
   getPendingTranscription,
@@ -46,6 +47,15 @@ export default function useTranscription(
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const recordingStartTimeRef = useRef<number>(0);
+
+  // Sync state with overlay window
+  useEffect(() => {
+    window.electron?.transcription?.updateState?.({
+      isRecording,
+      isProcessing,
+      recordingDuration
+    });
+  }, [isRecording, isProcessing, recordingDuration]);
 
   // Load pending count on mount
   useEffect(() => {
@@ -173,6 +183,17 @@ export default function useTranscription(
           const { result, error: transcriptionError, retryable } = await transcribeBlob(audioBlob);
 
           if (result) {
+            // Log cost
+            const minutes = duration / 60;
+            const cost = minutes * PRICING['whisper-1'].per_minute;
+            addCostLog({
+                model: 'whisper-1',
+                type: 'transcription',
+                seconds: duration,
+                cost,
+                metadata: { duration }
+            }).catch(e => console.error("Failed to log cost:", e));
+
             playSound("/sounds/transcription-finished.mp3");
             setIsProcessing(false);
             resolve(result);

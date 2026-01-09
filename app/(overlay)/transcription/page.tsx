@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
+import { Wand2, X, Square, Trash2, Copy } from "lucide-react";
 
 export default function TranscriptionPage() {
   // Override body background for transparent window
@@ -17,6 +18,8 @@ export default function TranscriptionPage() {
   const [interim, setInterim] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isRecording, setIsRecording] = useState(false); // Added recording state
+  const [isImproving, setIsImproving] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [progress, setProgress] = useState(0);
   const textRef = useRef<HTMLDivElement>(null);
@@ -36,32 +39,37 @@ export default function TranscriptionPage() {
     };
   }, []);
 
-  // Listen for processing state updates
+  // Listen for state updates (recording/processing)
   useEffect(() => {
-    console.log("[Transcription] Setting up processing state listener");
-    console.log("[Transcription] window.electron:", !!window.electron);
-    console.log("[Transcription] window.electron.transcription:", !!window.electron?.transcription);
-    console.log("[Transcription] onProcessingState:", !!window.electron?.transcription?.onProcessingState);
-
-    const unsubscribe = window.electron?.transcription?.onProcessingState?.(
-      (data: { isProcessing: boolean; recordingDuration: number }) => {
-        console.log("[Transcription] Received processing state:", data);
-        setIsProcessing(data.isProcessing);
-        setRecordingDuration(data.recordingDuration);
-        if (data.isProcessing) {
-          setProgress(0);
-        } else {
-          // Processing complete - fill the bar
-          setProgress(100);
-        }
-      }
-    );
-
-    console.log("[Transcription] Listener unsubscribe:", !!unsubscribe);
-
-    return () => {
-      unsubscribe?.();
-    };
+    // Check if onStateUpdate exists before using it
+    if (window.electron?.transcription?.onStateUpdate) {
+        const unsubscribe = window.electron.transcription.onStateUpdate(
+          (data: { isRecording: boolean; isProcessing: boolean; recordingDuration: number }) => {
+            console.log("[Transcription] Received state update:", data);
+            setIsRecording(data.isRecording);
+            setIsProcessing(data.isProcessing);
+            setRecordingDuration(data.recordingDuration);
+            
+            if (data.isProcessing) {
+              setProgress(0);
+            } else if (!data.isProcessing && data.recordingDuration > 0) {
+              // Processing complete - fill the bar if we were processing
+              setProgress(100);
+            }
+          }
+        );
+        return () => unsubscribe();
+    } else {
+        // Fallback to old listener if new one not available (shouldn't happen with updated preload)
+        console.warn("[Transcription] onStateUpdate not found, falling back to onProcessingState");
+        const unsubscribe = window.electron?.transcription?.onProcessingState?.(
+            (data: { isProcessing: boolean; recordingDuration: number }) => {
+              setIsProcessing(data.isProcessing);
+              setRecordingDuration(data.recordingDuration);
+            }
+        );
+        return () => unsubscribe?.();
+    }
   }, []);
 
   // Animate progress bar when processing
@@ -153,11 +161,63 @@ export default function TranscriptionPage() {
     await window.electron?.transcription?.closeWindow?.();
   }, []);
 
+  // Stop recording
+  const handleStop = useCallback(async () => {
+    await window.electron?.transcription?.stop?.();
+  }, []);
+
   // Copy and close
   const handleCopyAndClose = useCallback(async () => {
     await handleCopy();
     await handleClose();
   }, [handleCopy, handleClose]);
+
+  // Magic Wand Improve
+  const handleImprove = async () => {
+    if (!text) return;
+    setIsImproving(true);
+    
+    try {
+      // Default to 'your-style' (personal Telegram style) and 'auto' language
+      const currentStyle = 'your-style';
+      const currentLanguage = 'auto';
+      
+      const response = await fetch('/api/improve-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          originalText: text,
+          style: currentStyle,
+          language: currentLanguage,
+          additionalInstructions: ""
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to improve text');
+      }
+
+      if (!response.body) throw new Error("No response body");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedText = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        accumulatedText += decoder.decode(value, { stream: true });
+        setText(accumulatedText); // Stream result directly to text
+      }
+      
+      toast.success("Text improved");
+    } catch (err) {
+      console.error("Improvement failed:", err);
+      toast.error("Failed to improve text");
+    } finally {
+      setIsImproving(false);
+    }
+  };
 
   const displayText = text || "";
   const hasText = displayText.length > 0;
@@ -168,34 +228,57 @@ export default function TranscriptionPage() {
       style={{ WebkitAppRegion: "drag", background: "transparent" } as React.CSSProperties}
       onMouseDown={handleMouseDown}
     >
-      <div className="h-full w-full flex flex-col bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl border border-slate-600/50 shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden">
+      <div className="h-full w-full flex flex-col bg-gradient-to-br from-slate-900/95 to-slate-800/95 rounded-2xl border border-slate-600/50 shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden backdrop-blur-xl">
         {/* Header */}
         <div
-          className="flex items-center justify-between px-4 py-2.5 bg-slate-800/80 border-b border-slate-700/50"
+          className="flex items-center justify-between px-4 py-2.5 bg-slate-800/50 border-b border-slate-700/50"
           style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
         >
           <div className="flex items-center gap-2.5">
             <div className="relative flex items-center justify-center">
-              <div className={`w-2.5 h-2.5 rounded-full ${isProcessing ? 'bg-orange-500' : 'bg-red-500'}`} />
-              <div className={`absolute w-2.5 h-2.5 rounded-full ${isProcessing ? 'bg-orange-500' : 'bg-red-500'} animate-ping`} />
+              {/* Dot logic: 
+                  - If processing: Orange
+                  - If recording: Red + Blink
+                  - If idle: Grey + No Blink 
+              */}
+              <div 
+                className={`w-2.5 h-2.5 rounded-full transition-colors duration-300
+                  ${isProcessing ? 'bg-orange-500' : isRecording ? 'bg-red-500' : 'bg-slate-500'}
+                `} 
+              />
+              {(isRecording || isProcessing) && (
+                <div 
+                  className={`absolute w-2.5 h-2.5 rounded-full animate-ping opacity-75
+                    ${isProcessing ? 'bg-orange-500' : 'bg-red-500'}
+                  `} 
+                />
+              )}
             </div>
             <span className="text-sm font-medium text-slate-300">
-              {isProcessing ? 'Processing' : 'Live Transcription'}
+              {isProcessing ? 'Processing' : isRecording ? 'Live Transcription' : 'Transcription Paused'}
             </span>
           </div>
 
           <div
-            className="flex items-center"
+            className="flex items-center gap-1"
             style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
           >
+            {/* Show Stop button only if recording/processing */}
+            {(isRecording || isProcessing) && (
+                <button
+                onClick={handleStop}
+                className="p-1.5 hover:bg-red-500/20 rounded-lg transition-colors group"
+                title="Stop Recording"
+                >
+                <Square className="w-3.5 h-3.5 text-red-400 fill-current" />
+                </button>
+            )}
             <button
               onClick={handleClose}
-              className="p-1.5 hover:bg-slate-700/80 rounded-md transition-colors group"
+              className="p-1.5 hover:bg-slate-700/80 rounded-lg transition-colors group"
               title="Close"
             >
-              <svg className="w-4 h-4 text-slate-500 group-hover:text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              <X className="w-4 h-4 text-slate-500 group-hover:text-slate-300" />
             </button>
           </div>
         </div>
@@ -259,24 +342,44 @@ export default function TranscriptionPage() {
           className="flex items-center gap-2 px-3 py-2.5 bg-slate-800/60 border-t border-slate-700/50"
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         >
+          {/* Magic Wand Improve Button */}
+          {hasText && (
+            <button
+              onClick={handleImprove}
+              disabled={isImproving}
+              className={`p-2 rounded-lg transition-all border ${
+                isImproving 
+                  ? "bg-purple-500/20 text-purple-400 cursor-wait animate-pulse border-purple-500/30" 
+                  : "bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 hover:text-purple-300 border-purple-500/30"
+              }`}
+              title="Instant Improve (Magic Wand)"
+            >
+              <Wand2 className={`w-4 h-4 ${isImproving ? "animate-spin" : ""}`} />
+            </button>
+          )}
+
           <button
             onClick={handleClear}
             disabled={!hasText}
-            className="flex-1 px-3 py-2 text-sm font-medium text-slate-400 bg-slate-700/40 hover:bg-slate-700/70 hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-all"
+            className="p-2 text-slate-400 bg-slate-700/40 hover:bg-slate-700/70 hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-all"
+            title="Clear"
           >
-            Clear
+            <Trash2 className="w-4 h-4" />
           </button>
+          
           <button
             onClick={handleCopy}
             disabled={!hasText}
-            className="flex-1 px-3 py-2 text-sm font-medium text-slate-400 bg-slate-700/40 hover:bg-slate-700/70 hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-all"
+            className="flex-1 px-3 py-2 text-sm font-medium text-slate-300 bg-slate-700/40 hover:bg-slate-700/70 hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-all flex items-center justify-center gap-2"
           >
+            <Copy className="w-3.5 h-3.5" />
             Copy
           </button>
+          
           <button
             onClick={handleCopyAndClose}
             disabled={!hasText}
-            className="flex-1 px-3 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-all"
+            className="flex-1 px-3 py-2 text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-all shadow-lg shadow-purple-500/20"
           >
             Copy & Close
           </button>
