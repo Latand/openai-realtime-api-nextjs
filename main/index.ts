@@ -490,6 +490,7 @@ const COMPACTS_FILE = path.join(app.getPath("userData"), "conversation-compacts.
 const PERSISTENT_NOTES_FILE = path.join(app.getPath("userData"), "persistent-notes.json");
 const TEXT_IMPROVEMENT_SETTINGS_FILE = path.join(app.getPath("userData"), "text-improvement-settings.json");
 const SYSTEM_PROMPT_FILE = path.join(app.getPath("userData"), "system-prompt.txt");
+const APP_SETTINGS_FILE = path.join(app.getPath("userData"), "app-settings.json");
 
 ipcMain.handle("memory:saveCompacts", async (_, compacts: unknown[]) => {
   try {
@@ -568,6 +569,39 @@ ipcMain.handle("memory:loadSystemPrompt", async () => {
   } catch (error) {
     console.error("[Memory] Failed to load system prompt:", error);
     return { success: false, error: error instanceof Error ? error.message : String(error), prompt: null };
+  }
+});
+
+// App settings (microphone, etc.)
+ipcMain.handle("settings:save", async (_, settings: Record<string, unknown>) => {
+  try {
+    // Load existing settings and merge
+    let existing: Record<string, unknown> = {};
+    if (fs.existsSync(APP_SETTINGS_FILE)) {
+      existing = JSON.parse(fs.readFileSync(APP_SETTINGS_FILE, "utf-8"));
+    }
+    const merged = { ...existing, ...settings };
+    fs.writeFileSync(APP_SETTINGS_FILE, JSON.stringify(merged, null, 2), "utf-8");
+    console.log("[Settings] Saved:", Object.keys(settings));
+    return { success: true };
+  } catch (error) {
+    console.error("[Settings] Failed to save:", error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle("settings:load", async () => {
+  try {
+    if (!fs.existsSync(APP_SETTINGS_FILE)) {
+      console.log("[Settings] No settings file found");
+      return { success: true, settings: {} };
+    }
+    const settings = JSON.parse(fs.readFileSync(APP_SETTINGS_FILE, "utf-8"));
+    console.log("[Settings] Loaded:", Object.keys(settings));
+    return { success: true, settings };
+  } catch (error) {
+    console.error("[Settings] Failed to load:", error);
+    return { success: false, error: error instanceof Error ? error.message : String(error), settings: {} };
   }
 });
 

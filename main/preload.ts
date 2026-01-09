@@ -70,6 +70,11 @@ contextBridge.exposeInMainWorld("electron", {
       ipcRenderer.invoke("memory:saveSystemPrompt", prompt),
     loadSystemPrompt: () => ipcRenderer.invoke("memory:loadSystemPrompt"),
   },
+  settings: {
+    save: (settings: Record<string, unknown>) =>
+      ipcRenderer.invoke("settings:save", settings),
+    load: () => ipcRenderer.invoke("settings:load"),
+  },
   transcription: {
     openWindow: () => ipcRenderer.invoke("transcription:openWindow"),
     closeWindow: () => ipcRenderer.invoke("transcription:closeWindow"),

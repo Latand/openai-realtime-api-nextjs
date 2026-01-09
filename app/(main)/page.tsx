@@ -9,13 +9,17 @@ import { TranslationsProvider } from "@/components/translations-context";
 import { BroadcastButton } from "@/components/broadcast-button";
 import { StatusDisplay } from "@/components/status";
 import { MicrophoneSelector } from "@/components/microphone-select";
+import { VoiceSelector } from "@/components/voice-select";
 import { TranscriptWindow } from "@/components/transcript-window";
 import { SummariesWindow } from "@/components/summaries-window";
+import { FloatingTranscription } from "@/components/floating-transcription";
+import { AudioVisualizer } from "@/components/audio-visualizer";
 import { tools } from "@/lib/tools";
 import { playSound } from "@/lib/tools";
 import { Conversation } from "@/lib/conversations";
 import { v4 as uuidv4 } from "uuid";
 import { toast } from "sonner";
+import { IMPROVEMENT_STYLES, LanguageOption } from "@/lib/text-improvement-prompts";
 import {
   loadCompactsFromFile,
   formatCompactsForPrompt,
@@ -198,8 +202,9 @@ function useSoundEffects(isSessionActive: boolean, justReinitialized: boolean) {
 
 function AppContent() {
   // State management
-  const [voice] = useState("coral");
+  const [voice, setVoice] = useState("coral");
   const [selectedMicrophoneId, setSelectedMicrophoneId] = useState<string>("");
+  const [microphoneLoaded, setMicrophoneLoaded] = useState(false);
   const [manualStop, setManualStop] = useState(false);
   const [autoWakeWordEnabled, setAutoWakeWordEnabled] = useState(true);
   const [justReinitialized, setJustReinitialized] = useState(false);
@@ -221,6 +226,7 @@ function AppContent() {
     transcription: realtimeTranscription,
     interimTranscription,
     error: transcriptionError,
+    currentVolume: transcriptionVolume, // Get volume
     start: startTranscription,
     stop: stopTranscription,
     stopAndGetText: stopTranscriptionAndGetText,
@@ -282,6 +288,30 @@ function AppContent() {
     loadMemory();
   }, [loadMemory]);
 
+  // Load app settings (microphone, etc.) on mount
+  useEffect(() => {
+    const loadSettings = async () => {
+      if (window.electron?.settings) {
+        const { settings } = await window.electron.settings.load();
+        if (settings?.selectedMicrophoneId) {
+          debug("[Settings] Loaded microphone:", settings.selectedMicrophoneId);
+          setSelectedMicrophoneId(settings.selectedMicrophoneId as string);
+        }
+        setMicrophoneLoaded(true);
+      } else {
+        setMicrophoneLoaded(true);
+      }
+    };
+    loadSettings();
+  }, []);
+
+  // Save microphone preference when it changes (but only after initial load)
+  useEffect(() => {
+    if (!microphoneLoaded || !selectedMicrophoneId) return;
+    debug("[Settings] Saving microphone:", selectedMicrophoneId);
+    window.electron?.settings?.save({ selectedMicrophoneId });
+  }, [selectedMicrophoneId, microphoneLoaded]);
+
   debug("AppContent initialized with voice:", voice);
 
   const toolsFunctions = useToolsFunctions();
@@ -306,6 +336,7 @@ function AppContent() {
     clearConversation,
     isMuted,
     toggleMute,
+    currentVolume,
   } = useWebRTCAudioSession(voice, tools, mcpDefinitions, previousConversations, selectedMicrophoneId, systemPrompt);
 
   const prevSessionActiveRef = useRef(isSessionActive);
@@ -518,6 +549,50 @@ function AppContent() {
       }
     }
   }, [isSessionActive, isTranscribing, isTranscribingConnecting, isWhisperRecording, isWhisperProcessing, startTranscription, stopTranscriptionAndGetText, clearTranscription]);
+
+  // Instant improve function for magic wand
+  const handleImproveTranscription = useCallback(async (text: string): Promise<string> => {
+    if (!text) return "";
+    
+    // Default to 'your-style' (personal Telegram style) and 'auto' language
+    const currentStyle = 'your-style';
+    const currentLanguage = 'auto';
+    
+    try {
+      const response = await fetch('/api/improve-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          originalText: text,
+          style: currentStyle,
+          language: currentLanguage,
+          additionalInstructions: ""
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to improve text');
+      }
+
+      if (!response.body) throw new Error("No response body");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedText = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        accumulatedText += decoder.decode(value, { stream: true });
+      }
+      
+      return accumulatedText;
+    } catch (err) {
+      console.error("Failed to improve transcription:", err);
+      toast.error("Failed to improve text");
+      throw err;
+    }
+  }, []);
 
   // Handle text improvement toggle (Ctrl+Shift+G)
   const handleTextImprovementToggle = useCallback(async () => {
@@ -911,25 +986,41 @@ function AppContent() {
   return (
     <main className="h-full flex flex-col justify-center p-4 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
       {/* Main Content */}
-      <div className="flex flex-col items-center gap-4 max-w-md mx-auto w-full">
-        {/* Microphone Selector */}
-        <div className="w-full">
+      <div className="flex flex-col items-center gap-6 max-w-md mx-auto w-full">
+        {/* Settings Area (Microphone, Voice) */}
+        <div className="w-full space-y-3 bg-slate-900/50 p-4 rounded-xl border border-slate-800/50 backdrop-blur-sm">
           <MicrophoneSelector
             value={selectedMicrophoneId}
             onValueChange={setSelectedMicrophoneId}
             disabled={isSessionActive}
+            settingsLoaded={microphoneLoaded}
+          />
+          <VoiceSelector
+            value={voice}
+            onValueChange={setVoice}
           />
           {/* StatusDisplay uses toasts, no visual element */}
           <StatusDisplay status={status} />
         </div>
 
-        {/* Main Broadcast Button */}
-        <div className="w-full flex justify-center py-2">
-          <BroadcastButton
-            isSessionActive={isSessionActive}
-            detected={Boolean(detected)}
-            onClick={onButtonClick}
-          />
+        {/* Visualizer & Broadcast Button */}
+        <div className="w-full flex flex-col items-center justify-center py-4 relative">
+          {/* Visualizer Background */}
+          <div className="absolute inset-0 flex items-center justify-center opacity-30 pointer-events-none">
+             <AudioVisualizer 
+                currentVolume={currentVolume} 
+                isSessionActive={isSessionActive} 
+                color={isSessionActive ? "#f59e0b" : "#64748b"}
+             />
+          </div>
+
+          <div className="z-10 w-full max-w-[200px]">
+            <BroadcastButton
+              isSessionActive={isSessionActive}
+              detected={Boolean(detected)}
+              onClick={onButtonClick}
+            />
+          </div>
         </div>
 
         {/* Action Buttons Row */}
@@ -1109,6 +1200,19 @@ function AppContent() {
         onSaveSystemPrompt={handleSaveSystemPrompt}
         onResetSystemPrompt={handleResetSystemPrompt}
         onRefresh={loadMemory}
+      />
+      {/* Floating Transcription Window for Real-time Mode */}
+      <FloatingTranscription
+        isActive={isTranscribing}
+        isConnecting={isTranscribingConnecting}
+        transcription={realtimeTranscription}
+        interimTranscription={interimTranscription}
+        error={transcriptionError}
+        currentVolume={transcriptionVolume}
+        onStop={stopTranscription}
+        onClear={clearTranscription}
+        onCopy={handleCopyTranscription}
+        onImprove={handleImproveTranscription}
       />
     </main>
   );

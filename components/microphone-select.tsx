@@ -14,6 +14,7 @@ interface MicrophoneSelectorProps {
   value: string;
   onValueChange: (value: string) => void;
   disabled?: boolean;
+  settingsLoaded?: boolean; // Wait for settings before auto-selecting
 }
 
 export function useMicrophoneDevices() {
@@ -73,15 +74,23 @@ export function MicrophoneSelector({
   value,
   onValueChange,
   disabled = false,
+  settingsLoaded = true,
 }: MicrophoneSelectorProps) {
   const { devices, error, isLoading } = useMicrophoneDevices();
 
-  // Auto-select first device if none selected
+  // Auto-select first device if none selected (or saved device no longer exists)
   useEffect(() => {
-    if (!value && devices.length > 0 && !isLoading) {
+    if (!settingsLoaded || isLoading || devices.length === 0) return;
+
+    // Check if current value is valid (exists in devices list)
+    const valueIsValid = value && devices.some(d => d.deviceId === value);
+
+    if (!valueIsValid) {
+      // Auto-select first device
+      console.log("[MicrophoneSelector] Auto-selecting first device:", devices[0].label);
       onValueChange(devices[0].deviceId);
     }
-  }, [devices, value, onValueChange, isLoading]);
+  }, [devices, value, onValueChange, isLoading, settingsLoaded]);
 
   if (error) {
     return (

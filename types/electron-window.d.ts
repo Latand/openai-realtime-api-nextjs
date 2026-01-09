@@ -91,6 +91,16 @@ declare global {
           error?: string;
         }>;
       };
+      settings: {
+        save: (
+          settings: Record<string, unknown>
+        ) => Promise<{ success: boolean; error?: string }>;
+        load: () => Promise<{
+          success: boolean;
+          settings: Record<string, unknown>;
+          error?: string;
+        }>;
+      };
       transcription: {
         openWindow: () => Promise<{ success: boolean; alreadyOpen?: boolean; error?: string }>;
         closeWindow: () => Promise<{ success: boolean }>;
