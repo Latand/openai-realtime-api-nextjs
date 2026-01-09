@@ -541,15 +541,24 @@ function AppContent() {
 
         if (transcriptionResult?.text) {
           initialText = transcriptionResult.text;
+          // Also write to clipboard as backup
+          if (window.electron?.clipboard) {
+            await window.electron.clipboard.write(transcriptionResult.text);
+          }
           toast.success("Transcription captured for improvement");
         }
       }
 
       // Open a new text improvement window (always creates new instance)
       // Pass initialText directly if we have it from transcription
+      console.log("[TextImprovement] Opening window with text:", initialText?.substring(0, 50));
       const result = await window.electron?.textImprovement?.openWindow?.(initialText);
+      console.log("[TextImprovement] Window open result:", result);
       if (result?.success) {
         setIsTextImprovementOpen(true);
+      } else {
+        console.error("[TextImprovement] Failed to open window:", result);
+        toast.error("Failed to open text improvement window");
       }
     } catch (err) {
       console.error("Failed to open text improvement window:", err);

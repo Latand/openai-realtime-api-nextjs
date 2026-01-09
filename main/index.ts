@@ -222,7 +222,9 @@ async function createTextImprovementWindow(initialText?: string): Promise<Browse
     url += `?text=${encodedText}`;
   }
 
+  console.log("[TextImprovement] Loading URL:", url.substring(0, 100));
   await window.loadURL(url);
+  console.log("[TextImprovement] URL loaded successfully");
 
   if (isDevelopment) {
     // window.webContents.openDevTools({ mode: 'detach' });
@@ -291,12 +293,14 @@ app.on("ready", async () => {
 
   // Text Improvement window handlers
   ipcMain.handle("textImprovement:openWindow", async (_, initialText?: string) => {
+    console.log("[TextImprovement] openWindow called, initialText length:", initialText?.length || 0);
     try {
       // Always create a new window
       const window = await createTextImprovementWindow(initialText);
+      console.log("[TextImprovement] Window created successfully, id:", window.id);
       return { success: true, windowId: window.id };
     } catch (error) {
-      console.error("Failed to create text improvement window:", error);
+      console.error("[TextImprovement] Failed to create window:", error);
       return { success: false, error: String(error) };
     }
   });
