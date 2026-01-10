@@ -14,6 +14,10 @@ export class AudioChunkManager {
     this.stream = stream;
     this.chunks = [];
 
+    this._createAndStartRecorder(stream);
+  }
+
+  private _createAndStartRecorder(stream: MediaStream) {
     try {
       this.mediaRecorder = new MediaRecorder(stream, {
         mimeType: this.mimeType,
@@ -50,12 +54,28 @@ export class AudioChunkManager {
   }
 
   async getAccumulatedAudio(): Promise<Blob> {
-    // Return what we have so far
-    return new Blob(this.chunks, { type: this.mimeType });
+    // Stop current recorder to get all pending data
+    return new Promise((resolve) => {
+      if (!this.mediaRecorder || this.mediaRecorder.state === "inactive") {
+        resolve(new Blob(this.chunks, { type: this.mimeType }));
+        return;
+      }
+
+      this.mediaRecorder.onstop = () => {
+        const blob = new Blob(this.chunks, { type: this.mimeType });
+        resolve(blob);
+      };
+
+      this.mediaRecorder.stop();
+    });
   }
 
   clear() {
+    // Clear chunks and restart recorder with fresh headers
     this.chunks = [];
+    if (this.stream) {
+      this._createAndStartRecorder(this.stream);
+    }
   }
 
   isRecording() {

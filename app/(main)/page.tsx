@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useWakeWord } from "@/hooks/use-wake-word";
 import useWebRTCAudioSession, { Tool } from "@/hooks/use-webrtc";
-import useRealtimeTranscription from "@/hooks/use-realtime-transcription";
+import { useSmartTranscription } from "@/hooks/use-smart-transcription";
 import useTranscription from "@/hooks/use-transcription";
 import { useMCPFunctions, useToolsFunctions } from "@/hooks/use-tools";
 import { TranslationsProvider } from "@/components/translations-context";
@@ -232,19 +232,25 @@ function AppContent() {
   const [isTextImprovementOpen, setIsTextImprovementOpen] = useState(false);
   const wakeWordEnabled = autoWakeWordEnabled;
 
-  // Real-time transcription mode hook (Ctrl+Shift+T)
+  // Smart transcription mode hook (Ctrl+Shift+T) - local VAD
   const {
+    state: smartState,
     isActive: isTranscribing,
-    isConnecting: isTranscribingConnecting,
-    transcription: realtimeTranscription,
-    interimTranscription,
-    error: transcriptionError,
-    currentVolume: transcriptionVolume, // Get volume
     start: startTranscription,
     stop: stopTranscription,
-    stopAndGetText: stopTranscriptionAndGetText,
     clear: clearTranscription,
-  } = useRealtimeTranscription(selectedMicrophoneId);
+  } = useSmartTranscription({ deviceId: selectedMicrophoneId });
+
+  // Derived state from smart transcription
+  const isTranscribingConnecting = smartState.status === "listening";
+  const realtimeTranscription = smartState.transcription;
+  const interimTranscription = smartState.status === "listening"
+    ? "Listening..."
+    : smartState.status === "recording"
+    ? "Recording..."
+    : smartState.status === "processing"
+    ? "Processing..."
+    : "";
 
   // Whisper transcription mode hook (Ctrl+Shift+R) - better quality, record then transcribe
   const {
@@ -511,7 +517,7 @@ function AppContent() {
     }
   }, [isSessionActive, isTranscribing, isTranscribingConnecting, isWhisperRecording, startWhisperRecording, stopWhisperRecording]);
 
-  // Handle real-time transcription toggle (Ctrl+Shift+T)
+  // Handle smart transcription toggle (Ctrl+Shift+T)
   const handleTranscriptionToggle = useCallback(async () => {
     // Don't allow transcription during active voice session
     if (isSessionActive) {
@@ -524,8 +530,8 @@ function AppContent() {
     }
 
     if (isTranscribing || isTranscribingConnecting) {
-      // Stop and wait for final transcription (waits up to 5 seconds for pending audio)
-      const finalText = await stopTranscriptionAndGetText();
+      // Stop and get final transcription
+      const finalText = await stopTranscription();
 
       // Copy the final text to clipboard
       if (finalText) {
@@ -540,20 +546,18 @@ function AppContent() {
           console.error("Failed to copy transcription:", err);
         }
       }
-      // Don't close the window automatically so user can review/improve
-      // await window.electron?.transcription?.closeWindow?.();
     } else {
       // Clear previous transcription before starting new session
       clearTranscription();
       // Open window first, then start transcription
       const result = await window.electron?.transcription?.openWindow?.();
-      if (result?.success) {
+      if (result?.success || result?.alreadyOpen) {
         await startTranscription();
       } else {
         toast.error("Failed to open transcription window");
       }
     }
-  }, [isSessionActive, isTranscribing, isTranscribingConnecting, isWhisperRecording, isWhisperProcessing, startTranscription, stopTranscriptionAndGetText, clearTranscription]);
+  }, [isSessionActive, isTranscribing, isTranscribingConnecting, isWhisperRecording, isWhisperProcessing, startTranscription, stopTranscription, clearTranscription]);
 
   // Handle text improvement toggle (Ctrl+Shift+G)
   const handleTextImprovementToggle = useCallback(async () => {

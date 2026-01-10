@@ -103,20 +103,24 @@ export class VADProcessor {
       }
     } else {
       // Recording state - waiting for silence
-      if (rms < this.config.silenceThreshold) {
+      // Use speechThreshold as the silence boundary (below speech = silence)
+      const effectiveSilenceThreshold = this.config.speechThreshold * 0.5;
+
+      if (rms < effectiveSilenceThreshold) {
         if (this.silenceStartTime === null) {
           this.silenceStartTime = now;
+          console.log("[VAD] Silence started, RMS:", rms.toFixed(4), "threshold:", effectiveSilenceThreshold.toFixed(4));
         } else if (now - this.silenceStartTime > this.config.pauseDuration) {
           // Silence detected for long enough
           const duration = this.recordingStartTime ? now - this.recordingStartTime : 0;
 
           if (duration > this.config.minRecordingDuration) {
-            // console.log("[VAD] Silence detected, stopping recording. Duration:", duration);
+            console.log("[VAD] Silence detected, stopping recording. Duration:", duration);
             this.isRecording = false;
             this.onSpeechEnd?.();
           } else {
             // Too short, just reset
-            // console.log("[VAD] Recording too short, ignoring. Duration:", duration);
+            console.log("[VAD] Recording too short, ignoring. Duration:", duration);
             this.isRecording = false;
             // No callback, just go back to listening
           }
@@ -124,6 +128,9 @@ export class VADProcessor {
         }
       } else {
         // Speech detected again, reset silence timer
+        if (this.silenceStartTime !== null) {
+          console.log("[VAD] Speech resumed, RMS:", rms.toFixed(4));
+        }
         this.silenceStartTime = null;
       }
     }

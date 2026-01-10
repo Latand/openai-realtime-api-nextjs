@@ -82,6 +82,10 @@ OUTPUT RULES:
 4. Do NOT add explanations or preamble
 `;
 
+// Transcription style hint for Whisper API (max 224 tokens used)
+// NOTE: Don't include examples - they cause Whisper to default to that language
+export const TRANSCRIPTION_STYLE_HINT = `Transcribe exactly what is spoken. The speaker uses Russian, Ukrainian, and English freely mixed. Never output phrases like "Thanks for watching", "Subscribe", "Дякую за перегляд", "До зустрічі" - these are hallucinations.`;
+
 export const STYLE_PROMPTS: Record<ImprovementStyle, string> = {
   'your-style': `
 You are an AI assistant that improves text to match the user's personal writing style.

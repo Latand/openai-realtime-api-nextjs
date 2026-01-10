@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { playSound } from "@/lib/tools";
 import { addCostLog, PRICING } from "@/lib/cost-tracker";
+import { TRANSCRIPTION_STYLE_HINT } from "@/lib/text-improvement-prompts";
 import {
   savePendingTranscription,
   getPendingTranscription,
@@ -71,6 +72,19 @@ export default function useTranscription(
     }
   }, []);
 
+  // Common Whisper hallucinations to filter out
+  const HALLUCINATION_PATTERNS = [
+    /дякую за перегляд/i,
+    /до зустрічі/i,
+    /підписуйтесь/i,
+    /thanks for watching/i,
+    /subscribe/i,
+    /see you next time/i,
+    /thank you for listening/i,
+    /спасибо за просмотр/i,
+    /до свидания/i,
+  ];
+
   // Helper to transcribe a blob
   const transcribeBlob = useCallback(
     async (
@@ -79,6 +93,11 @@ export default function useTranscription(
     ): Promise<{ result: TranscriptionResult | null; error?: string; retryable?: boolean }> => {
       const formData = new FormData();
       formData.append("audio", audioBlob, "recording.webm");
+
+      // Add prompt for better transcription
+      if (TRANSCRIPTION_STYLE_HINT) {
+        formData.append("prompt", TRANSCRIPTION_STYLE_HINT);
+      }
 
       const response = await fetch("/api/transcribe", {
         method: "POST",
@@ -95,9 +114,17 @@ export default function useTranscription(
       }
 
       const data = await response.json();
+      let text = data.text?.trim() || "";
+
+      // Filter out hallucinations
+      if (text && HALLUCINATION_PATTERNS.some(p => p.test(text))) {
+        console.warn("[Transcription] Filtered hallucination:", text);
+        text = "";
+      }
+
       return {
         result: {
-          text: data.text || "",
+          text,
           timestamp: new Date().toISOString(),
           pendingId,
         },

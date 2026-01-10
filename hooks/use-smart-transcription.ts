@@ -17,6 +17,7 @@ import {
 } from "@/types/smart-transcription";
 import { VADProcessor } from "@/lib/audio/vad-processor";
 import { AudioChunkManager } from "@/lib/audio/audio-chunk-manager";
+import { TRANSCRIPTION_STYLE_HINT } from "@/lib/text-improvement-prompts";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 
@@ -61,6 +62,25 @@ export function useSmartTranscription({
     statusRef.current = status;
   }, [status]);
 
+  // Build prompt for Whisper with previous context + style hints
+  const buildTranscriptionPrompt = useCallback(() => {
+    const parts: string[] = [];
+
+    // Add style hint (Whisper uses last 224 tokens, so keep it concise)
+    if (TRANSCRIPTION_STYLE_HINT) {
+      parts.push(TRANSCRIPTION_STYLE_HINT.trim());
+    }
+
+    // Add previous transcription as context (last ~500 chars to stay within token limit)
+    const prevText = transcriptionRef.current;
+    if (prevText) {
+      const contextText = prevText.length > 500 ? prevText.slice(-500) : prevText;
+      parts.push(`Previous: ${contextText}`);
+    }
+
+    return parts.join("\n\n");
+  }, []);
+
   // Transcribe function
   const transcribeBlob = useCallback(
     async (audioBlob: Blob, durationMs: number): Promise<string | null> => {
@@ -69,6 +89,12 @@ export function useSmartTranscription({
 
         const formData = new FormData();
         formData.append("audio", audioBlob, "recording.webm");
+
+        // Add prompt with style + previous context
+        const prompt = buildTranscriptionPrompt();
+        if (prompt) {
+          formData.append("prompt", prompt);
+        }
 
         const response = await fetch("/api/transcribe", {
           method: "POST",
@@ -81,7 +107,25 @@ export function useSmartTranscription({
         }
 
         const data = await response.json();
-        const text = data.text?.trim();
+        let text = data.text?.trim();
+
+        // Filter out common Whisper hallucinations
+        const HALLUCINATION_PATTERNS = [
+          /дякую за перегляд/i,
+          /до зустрічі/i,
+          /підписуйтесь/i,
+          /thanks for watching/i,
+          /subscribe/i,
+          /see you next time/i,
+          /thank you for listening/i,
+          /спасибо за просмотр/i,
+          /до свидания/i,
+        ];
+
+        if (text && HALLUCINATION_PATTERNS.some(p => p.test(text))) {
+          console.warn("[Transcription] Filtered hallucination:", text);
+          text = null;
+        }
 
         if (text) {
           const durationSec = durationMs / 1000;
@@ -145,7 +189,7 @@ export function useSmartTranscription({
         });
       }
     },
-    []
+    [buildTranscriptionPrompt]
   );
 
   const start = useCallback(async () => {

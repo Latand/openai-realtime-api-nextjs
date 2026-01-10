@@ -27,7 +27,8 @@ async function fetchWithTimeout(
 
 async function transcribeWithRetry(
   audioFile: File,
-  apiKey: string
+  apiKey: string,
+  prompt?: string
 ): Promise<{ success: boolean; data?: unknown; error?: string; retryable?: boolean }> {
   let lastError: Error | null = null;
 
@@ -38,6 +39,11 @@ async function transcribeWithRetry(
       openaiFormData.append("file", audioFile, "audio.webm");
       openaiFormData.append("model", "whisper-1");
       openaiFormData.append("response_format", "json");
+
+      // Add prompt for context (previous transcription + style hints)
+      if (prompt) {
+        openaiFormData.append("prompt", prompt);
+      }
 
       console.log(`[Transcribe] Attempt ${attempt + 1}/${MAX_RETRIES}...`);
 
@@ -108,6 +114,7 @@ export async function POST(request: NextRequest) {
 
     const formData = await request.formData();
     const audioFile = formData.get("audio") as File | null;
+    const prompt = formData.get("prompt") as string | null;
 
     if (!audioFile) {
       return NextResponse.json(
@@ -116,7 +123,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await transcribeWithRetry(audioFile, process.env.OPENAI_API_KEY);
+    const result = await transcribeWithRetry(
+      audioFile,
+      process.env.OPENAI_API_KEY,
+      prompt || undefined
+    );
 
     if (result.success) {
       return NextResponse.json(result.data, { headers: NO_STORE_HEADERS });
