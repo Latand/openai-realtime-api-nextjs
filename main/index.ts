@@ -159,6 +159,8 @@ async function createTranscriptionWindow(): Promise<BrowserWindow> {
     alwaysOnTop: true,
     resizable: true,
     skipTaskbar: true,
+    show: false, // Don't show immediately - we'll use showInactive
+    focusable: false, // Prevent focus stealing
   });
 
   window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -168,6 +170,12 @@ async function createTranscriptionWindow(): Promise<BrowserWindow> {
     : `${nextServerUrl}/transcription`;
 
   await window.loadURL(url);
+
+  // Show window without stealing focus from other apps
+  window.showInactive();
+
+  // Re-enable focusable for later interactions
+  window.setFocusable(true);
 
   window.on("closed", () => {
     transcriptionWindow = null;
@@ -253,7 +261,7 @@ app.on("ready", async () => {
   // Transcription window handlers
   ipcMain.handle("transcription:openWindow", async () => {
     if (transcriptionWindow) {
-      transcriptionWindow.focus();
+      // Don't focus - keep user's current window focused
       return { success: true, alreadyOpen: true };
     }
     try {
