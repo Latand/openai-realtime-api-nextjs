@@ -21,19 +21,40 @@ export default function TranscriptionPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isImproving, setIsImproving] = useState(false);
+  const [newTextStart, setNewTextStart] = useState<number | null>(null);
   const textRef = useRef<HTMLDivElement>(null);
+  const fadeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Listen for text updates from main window
   useEffect(() => {
     const unsubscribe = window.electron?.transcription?.onTextUpdate?.(
       (data: { text: string; interim: string }) => {
-        setText(data.text);
+        setText((prevText) => {
+          // If new text is longer, mark where new content starts
+          if (data.text.length > prevText.length && data.text.startsWith(prevText)) {
+            setNewTextStart(prevText.length);
+
+            // Clear previous timeout
+            if (fadeTimeoutRef.current) {
+              clearTimeout(fadeTimeoutRef.current);
+            }
+
+            // Fade out highlight after 3 seconds
+            fadeTimeoutRef.current = setTimeout(() => {
+              setNewTextStart(null);
+            }, 3000);
+          }
+          return data.text;
+        });
         setInterim(data.interim);
       }
     );
 
     return () => {
       unsubscribe?.();
+      if (fadeTimeoutRef.current) {
+        clearTimeout(fadeTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -230,7 +251,16 @@ export default function TranscriptionPage() {
         >
           {displayText ? (
             <p className="text-slate-100 text-base leading-relaxed whitespace-pre-wrap">
-              {displayText}
+              {newTextStart !== null && newTextStart < displayText.length ? (
+                <>
+                  {displayText.slice(0, newTextStart)}
+                  <span className="text-emerald-400 bg-emerald-500/10 rounded px-0.5 transition-all duration-500">
+                    {displayText.slice(newTextStart)}
+                  </span>
+                </>
+              ) : (
+                displayText
+              )}
               {interim && (
                 <span className="text-purple-400/80 italic"> {interim}</span>
               )}
