@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Instrument_Serif, Geist_Mono } from "next/font/google";
 import { X, Copy, Check, RefreshCw, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
@@ -395,7 +395,7 @@ export default function TextImprovementPage() {
       setIsCopied(true);
       toast.success("Copied to clipboard");
       setTimeout(() => setIsCopied(false), 2000);
-    } catch (err) {
+    } catch {
       toast.error("Failed to copy");
     }
   };
@@ -451,7 +451,7 @@ export default function TextImprovementPage() {
       
       <div className="card">
         {/* Header */}
-        <div className="h-12 flex items-center justify-between px-5 select-none" style={{ WebkitAppRegion: 'drag' } as any}>
+        <div className="h-12 flex items-center justify-between px-5 select-none" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}>
           <div className="flex items-center gap-3">
              <div className={`status-dot ${status === 'loading' ? 'processing' : ''}`} />
              <h1 className="title font-display text-lg text-[var(--text-primary)]">Text Improvement</h1>
@@ -459,7 +459,7 @@ export default function TextImprovementPage() {
           <button 
              onClick={handleClose}
              className="close-btn p-1 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-             style={{ WebkitAppRegion: 'no-drag' } as any}
+             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           >
             <X size={18} />
           </button>

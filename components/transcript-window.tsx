@@ -19,7 +19,6 @@ export function TranscriptWindow({
   onCompact,
 }: TranscriptWindowProps) {
   const windowRef = useRef<Window | null>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
   const onClearRef = useRef(onClear);
   const onCompactRef = useRef(onCompact);
 

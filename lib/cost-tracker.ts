@@ -16,7 +16,7 @@ export interface CostLog {
   tokens?: number; // For LLMs
   seconds?: number; // For audio/transcription
   cost: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 // Pricing based on Jan 2026 data
@@ -121,12 +121,12 @@ export async function getCostStats(
   let range: IDBKeyRange | null = null;
   if (period !== 'all') {
     const now = new Date();
-    let startDate = new Date();
-    
+    const startDate = new Date();
+
     if (period === 'day') startDate.setDate(now.getDate() - 1);
     if (period === 'week') startDate.setDate(now.getDate() - 7);
     if (period === 'month') startDate.setMonth(now.getMonth() - 1);
-    
+
     range = IDBKeyRange.lowerBound(startDate.toISOString());
   }
 
@@ -180,7 +180,7 @@ export async function clearCostLogs(): Promise<void> {
   }
 }
 
-export function calculateRealtimeCost(usage: any): number {
+export function calculateRealtimeCost(usage: Record<string, { total_tokens?: number }>): number {
     const model = 'gpt-realtime';
     const prices = PRICING[model];
     

@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Save, Eye, EyeOff, Terminal, Key, Power, Mic, MessageSquare, Activity } from "lucide-react";
+import { ArrowLeft, Save, Eye, EyeOff, Terminal, Key, Power, Mic, Activity } from "lucide-react";
 import { toast } from "sonner";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { MicrophoneSelector } from "@/components/microphone-select";
 import { VoiceSelector } from "@/components/voice-select";
 import { getDefaultSystemPrompt } from "@/lib/conversation-memory";
 import { TranslationsProvider } from "@/components/translations-context";
@@ -19,8 +18,8 @@ export default function SettingsPage() {
   const [showApiKey, setShowApiKey] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [autoLaunch, setAutoLaunch] = useState(false);
-  const [isHiddenOnLaunch, setIsHiddenOnLaunch] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isHiddenOnLaunch] = useState(false);
+  const [, setIsLoading] = useState(true);
   
   // These states are managed by global state in the main page usually, 
   // but for a dedicated settings page, we might need to access them via context 
@@ -203,7 +202,7 @@ export default function SettingsPage() {
                  </p>
               )}
               <p className="text-xs text-slate-500 flex justify-between mt-1">
-                <span>Required for "Hi Celestial" wake word detection.</span>
+                <span>Required for &quot;Hi Celestial&quot; wake word detection.</span>
                 <a 
                   href="https://console.picovoice.ai/" 
                   target="_blank" 

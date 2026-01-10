@@ -7,7 +7,6 @@ import useTranscription from "@/hooks/use-transcription";
 import { useMCPFunctions, useToolsFunctions } from "@/hooks/use-tools";
 import { TranslationsProvider } from "@/components/translations-context";
 import { BroadcastButton } from "@/components/broadcast-button";
-import { StatusDisplay } from "@/components/status";
 import { MicrophoneSelector } from "@/components/microphone-select";
 import { VoiceSelector } from "@/components/voice-select";
 import { TranscriptWindow } from "@/components/transcript-window";
@@ -19,7 +18,6 @@ import { ChatInput } from "@/components/chat-input";
 import { tools } from "@/lib/tools";
 import { playSound } from "@/lib/tools";
 import { Conversation } from "@/lib/conversations";
-import { v4 as uuidv4 } from "uuid";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -28,7 +26,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Settings, Mic, MessageSquare } from "lucide-react";
+import { Settings } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 
@@ -217,7 +215,6 @@ function AppContent() {
   // State management
   const [voice, setVoice] = useState("coral");
   const [selectedMicrophoneId, setSelectedMicrophoneId] = useState<string>("");
-  const [microphoneLoaded, setMicrophoneLoaded] = useState(false);
   const [manualStop, setManualStop] = useState(false);
   const [autoWakeWordEnabled, setAutoWakeWordEnabled] = useState(true);
   const [justReinitialized, setJustReinitialized] = useState(false);
@@ -229,7 +226,7 @@ function AppContent() {
   const [persistentNotes, setPersistentNotes] = useState<string[]>([]);
   const [systemPrompt, setSystemPrompt] = useState<string>(getDefaultSystemPrompt());
   const [transcriptionEntries, setTranscriptionEntries] = useState<Conversation[]>([]);
-  const [isTextImprovementOpen, setIsTextImprovementOpen] = useState(false);
+  const [, setIsTextImprovementOpen] = useState(false);
   const wakeWordEnabled = autoWakeWordEnabled;
 
   // Smart transcription mode hook (Ctrl+Shift+T) - local VAD
@@ -256,13 +253,10 @@ function AppContent() {
   const {
     isRecording: isWhisperRecording,
     isProcessing: isWhisperProcessing,
-    error: whisperError,
     startRecording: startWhisperRecording,
     stopRecording: stopWhisperRecording,
   } = useTranscription(selectedMicrophoneId);
 
-  // Track which transcription mode is active
-  const [whisperText, setWhisperText] = useState("");
   const whisperStartTimeRef = useRef<number>(0);
 
   // Load previous conversation compacts on mount
@@ -315,18 +309,13 @@ function AppContent() {
     toolDefinitions: mcpToolDefinitions,
   } = useMCPFunctions();
 
-  // Store pending Claude requests: requestId -> callId
-  const pendingClaudeRequests = useRef<Map<string, string>>(new Map());
-
   // Initialize WebRTC session with all tools
   const {
-    status,
     isSessionActive,
     startSession,
     stopSession,
     registerFunction,
     sendTextMessage,
-    sendFunctionOutput,
     conversation,
     clearConversation,
     isMuted,
@@ -728,12 +717,10 @@ function AppContent() {
   );
 
   const {
-    startPorcupine: startWakeWord,
     stopPorcupine: stopWakeWord,
     isReady: wakeReady,
     isListening: wakeListening,
     error: wakeError,
-    reinitializeEngine,
     detected,
   } = useWakeWord(wakeWordConfig);
 
@@ -1000,7 +987,7 @@ function AppContent() {
                   <div className="flex items-center justify-between space-x-2 bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
                     <Label htmlFor="wake-word" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex flex-col gap-1">
                       <span>Wake Word</span>
-                      <span className="text-xs font-normal text-slate-400">Listen for "Hi Celestial"</span>
+                      <span className="text-xs font-normal text-slate-400">Listen for &quot;Hi Celestial&quot;</span>
                     </Label>
                     <Switch
                       id="wake-word"

@@ -81,7 +81,7 @@ export default function TranscriptionPage() {
         await navigator.clipboard.writeText(text);
       }
       toast.success("Copied to clipboard");
-    } catch (err) {
+    } catch {
       toast.error("Failed to copy");
     }
   }, [text]);

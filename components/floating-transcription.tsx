@@ -96,7 +96,7 @@ export function FloatingTranscription({
       toast.success("Copied to clipboard");
     }
     onStop();
-  }, [onCopy, onStop, improvedText, transcription]);
+  }, [onStop, improvedText, transcription]);
 
   const handleImprove = async () => {
     if (!onImprove || !transcription) return;
