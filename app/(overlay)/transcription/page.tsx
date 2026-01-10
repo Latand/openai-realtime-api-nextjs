@@ -17,8 +17,9 @@ export default function TranscriptionPage() {
   const [text, setText] = useState("");
   const [interim, setInterim] = useState("");
   const [isDragging, setIsDragging] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isRecording, setIsRecording] = useState(false); // Added recording state
+  const [isRecording, setIsRecording] = useState(false);
   const [isImproving, setIsImproving] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [progress, setProgress] = useState(0);
@@ -39,11 +40,12 @@ export default function TranscriptionPage() {
     };
   }, []);
 
-  // Listen for state updates (recording/processing)
+  // Listen for state updates (listening/recording/processing)
   useEffect(() => {
     const unsubscribe = window.electron?.transcription?.onStateUpdate(
-      (data: { isRecording: boolean; isProcessing: boolean; recordingDuration: number }) => {
+      (data: { isListening?: boolean; isRecording: boolean; isProcessing: boolean; recordingDuration: number }) => {
         console.log("[Transcription] Received state update:", data);
+        setIsListening(data.isListening ?? false);
         setIsRecording(data.isRecording);
         setIsProcessing(data.isProcessing);
         setRecordingDuration(data.recordingDuration);
@@ -136,10 +138,12 @@ export default function TranscriptionPage() {
     }
   }, [text]);
 
-  // Clear text
-  const handleClear = useCallback(() => {
+  // Clear text - also notify main window to clear hook data
+  const handleClear = useCallback(async () => {
     setText("");
     setInterim("");
+    // Notify main window to clear transcription data in the hook
+    await window.electron?.transcription?.clear?.();
   }, []);
 
   // Close window
@@ -222,26 +226,27 @@ export default function TranscriptionPage() {
         >
           <div className="flex items-center gap-2.5">
             <div className="relative flex items-center justify-center">
-              {/* Dot logic: 
-                  - If processing: Orange
+              {/* Dot logic:
+                  - If processing: Orange + Blink
                   - If recording: Red + Blink
-                  - If idle: Grey + No Blink 
+                  - If listening: Green + Blink
+                  - If idle: Grey + No Blink
               */}
-              <div 
+              <div
                 className={`w-2.5 h-2.5 rounded-full transition-colors duration-300
-                  ${isProcessing ? 'bg-orange-500' : isRecording ? 'bg-red-500' : 'bg-slate-500'}
-                `} 
+                  ${isProcessing ? 'bg-orange-500' : isRecording ? 'bg-red-500' : isListening ? 'bg-emerald-500' : 'bg-slate-500'}
+                `}
               />
-              {(isRecording || isProcessing) && (
-                <div 
+              {(isRecording || isProcessing || isListening) && (
+                <div
                   className={`absolute w-2.5 h-2.5 rounded-full animate-ping opacity-75
-                    ${isProcessing ? 'bg-orange-500' : 'bg-red-500'}
-                  `} 
+                    ${isProcessing ? 'bg-orange-500' : isRecording ? 'bg-red-500' : 'bg-emerald-500'}
+                  `}
                 />
               )}
             </div>
             <span className="text-sm font-medium text-slate-300">
-              {isProcessing ? 'Processing' : isRecording ? 'Live Transcription' : 'Transcription Paused'}
+              {isProcessing ? 'Processing' : isRecording ? 'Recording' : isListening ? 'Listening...' : 'Paused'}
             </span>
           </div>
 
@@ -249,8 +254,8 @@ export default function TranscriptionPage() {
             className="flex items-center gap-1"
             style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
           >
-            {/* Show Stop button only if recording/processing */}
-            {(isRecording || isProcessing) && (
+            {/* Show Stop button only if listening/recording/processing */}
+            {(isListening || isRecording || isProcessing) && (
                 <button
                 onClick={handleStop}
                 className="p-1.5 hover:bg-red-500/20 rounded-lg transition-colors group"

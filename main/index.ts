@@ -288,10 +288,16 @@ app.on("ready", async () => {
     return { success: true };
   });
 
-  ipcMain.handle("transcription:updateState", (_, state: { isRecording: boolean; isProcessing: boolean; recordingDuration: number }) => {
+  ipcMain.handle("transcription:updateState", (_, state: { isListening?: boolean; isRecording: boolean; isProcessing: boolean; recordingDuration: number }) => {
     if (transcriptionWindow) {
       transcriptionWindow.webContents.send("transcription:stateUpdate", state);
     }
+    return { success: true };
+  });
+
+  ipcMain.handle("transcription:clear", () => {
+    // Notify main window to clear transcription data in the hook
+    mainWindow?.webContents.send("transcription:clear");
     return { success: true };
   });
 

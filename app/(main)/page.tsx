@@ -406,6 +406,21 @@ function AppContent() {
     }
   }, [realtimeTranscription, interimTranscription, isTranscribing, isTranscribingConnecting]);
 
+  // Send smart transcription state updates to window
+  useEffect(() => {
+    if (smartState.status !== "idle") {
+      const isListening = smartState.status === "listening";
+      const isRecording = smartState.status === "recording";
+      const isProcessing = smartState.status === "processing";
+      window.electron?.transcription?.updateState?.({
+        isListening,
+        isRecording,
+        isProcessing,
+        recordingDuration: 0, // Smart mode doesn't track duration the same way
+      });
+    }
+  }, [smartState.status]);
+
   // Update transcription window for Whisper mode recording status
   // Note: Processing state is handled directly in handleWhisperToggle for better timing
   useEffect(() => {
@@ -445,6 +460,15 @@ function AppContent() {
     });
     return () => unsubscribe?.();
   }, [isTranscribing, stopTranscription, isWhisperRecording, stopWhisperRecording]);
+
+  // Listen for transcription clear event from IPC (when user clicks Clear in window)
+  useEffect(() => {
+    const unsubscribe = window.electron?.transcription?.onClear?.(() => {
+      console.log("[Transcription] Clear command received from IPC");
+      clearTranscription();
+    });
+    return () => unsubscribe?.();
+  }, [clearTranscription]);
 
   // Listen for text improvement window closed
   useEffect(() => {

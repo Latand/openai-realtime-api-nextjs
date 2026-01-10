@@ -22,16 +22,16 @@ import { nanoid } from "nanoid";
 import { toast } from "sonner";
 
 const DEFAULT_VAD_CONFIG: VADConfig = {
-  speechThreshold: 0.02,
-  silenceThreshold: 0.008,
+  speechThreshold: 0.05, // Increased from 0.02 - less sensitive to background noise
+  silenceThreshold: 0.02, // Increased from 0.008 - requires more quiet to detect silence
   pauseDuration: 2000, // 2s pause to trigger transcription
   minRecordingDuration: 500,
 };
 
 export function useSmartTranscription({
   pauseDuration = 2000,
-  speechThreshold = 0.02,
-  silenceThreshold = 0.008,
+  speechThreshold = 0.05,
+  silenceThreshold = 0.02,
   deviceId,
   onTranscriptionComplete,
 }: UseSmartTranscriptionOptions = {}): UseSmartTranscriptionReturn {

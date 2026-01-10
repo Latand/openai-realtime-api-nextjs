@@ -79,9 +79,10 @@ contextBridge.exposeInMainWorld("electron", {
     openWindow: () => ipcRenderer.invoke("transcription:openWindow"),
     closeWindow: () => ipcRenderer.invoke("transcription:closeWindow"),
     stop: () => ipcRenderer.invoke("transcription:stop"),
+    clear: () => ipcRenderer.invoke("transcription:clear"),
     updateText: (text: string, interim: string) =>
       ipcRenderer.invoke("transcription:updateText", text, interim),
-    updateState: (state: { isRecording: boolean; isProcessing: boolean; recordingDuration: number }) =>
+    updateState: (state: { isListening?: boolean; isRecording: boolean; isProcessing: boolean; recordingDuration: number }) =>
       ipcRenderer.invoke("transcription:updateState", state),
     onTextUpdate: (callback: (data: { text: string; interim: string }) => void) => {
       const handler = (_event: IpcRendererEvent, data: { text: string; interim: string }) => callback(data);
@@ -102,6 +103,11 @@ contextBridge.exposeInMainWorld("electron", {
       const handler = () => callback();
       ipcRenderer.on("transcription:stop", handler);
       return () => ipcRenderer.removeListener("transcription:stop", handler);
+    },
+    onClear: (callback: () => void) => {
+      const handler = () => callback();
+      ipcRenderer.on("transcription:clear", handler);
+      return () => ipcRenderer.removeListener("transcription:clear", handler);
     },
   },
   textImprovement: {
