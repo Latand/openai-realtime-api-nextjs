@@ -180,7 +180,12 @@ export async function clearCostLogs(): Promise<void> {
   }
 }
 
-export function calculateRealtimeCost(usage: Record<string, { total_tokens?: number }>): number {
+interface RealtimeUsage {
+  input_token_details?: { text_tokens?: number; audio_tokens?: number };
+  output_token_details?: { text_tokens?: number; audio_tokens?: number };
+}
+
+export function calculateRealtimeCost(usage: RealtimeUsage): number {
     const model = 'gpt-realtime';
     const prices = PRICING[model];
     

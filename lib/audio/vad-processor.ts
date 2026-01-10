@@ -28,7 +28,6 @@ export class VADProcessor {
   }
 
   connect(stream: MediaStream) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
     this.analyserNode = this.audioContext.createAnalyser();
     this.analyserNode.fftSize = 2048; // Good balance for time domain data

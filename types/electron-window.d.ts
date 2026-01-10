@@ -100,6 +100,21 @@ declare global {
           settings: Record<string, unknown>;
           error?: string;
         }>;
+        getApiKey: () => Promise<{
+          apiKey?: string;
+          anthropicKey?: string;
+          picovoiceKey?: string;
+        }>;
+        saveApiKey: (
+          apiKey: string,
+          anthropicKey: string,
+          picovoiceKey: string
+        ) => Promise<{ success: boolean; error?: string }>;
+        getAutoLaunch: () => Promise<{ isEnabled: boolean }>;
+        setAutoLaunch: (
+          enabled: boolean,
+          isHidden: boolean
+        ) => Promise<{ success: boolean; error?: string }>;
       };
       transcription: {
         openWindow: () => Promise<{ success: boolean; alreadyOpen?: boolean; error?: string }>;
