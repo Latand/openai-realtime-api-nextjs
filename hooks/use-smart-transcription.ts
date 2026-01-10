@@ -120,6 +120,8 @@ export function useSmartTranscription({
           /thank you for listening/i,
           /спасибо за просмотр/i,
           /до свидания/i,
+          /спасибо за субтитры/i,
+          /субтитры.*дубровск/i,
         ];
 
         if (text && HALLUCINATION_PATTERNS.some(p => p.test(text))) {

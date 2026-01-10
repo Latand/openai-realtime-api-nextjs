@@ -21,10 +21,7 @@ export default function TranscriptionPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isImproving, setIsImproving] = useState(false);
-  const [recordingDuration, setRecordingDuration] = useState(0);
-  const [progress, setProgress] = useState(0);
   const textRef = useRef<HTMLDivElement>(null);
-  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Listen for text updates from main window
   useEffect(() => {
@@ -43,64 +40,15 @@ export default function TranscriptionPage() {
   // Listen for state updates (listening/recording/processing)
   useEffect(() => {
     const unsubscribe = window.electron?.transcription?.onStateUpdate(
-      (data: { isListening?: boolean; isRecording: boolean; isProcessing: boolean; recordingDuration: number }) => {
+      (data: { isListening?: boolean; isRecording: boolean; isProcessing: boolean }) => {
         console.log("[Transcription] Received state update:", data);
         setIsListening(data.isListening ?? false);
         setIsRecording(data.isRecording);
         setIsProcessing(data.isProcessing);
-        setRecordingDuration(data.recordingDuration);
-
-        if (data.isProcessing) {
-          setProgress(0);
-        } else if (!data.isProcessing && data.recordingDuration > 0) {
-          setProgress(100);
-        }
       }
     );
     return () => unsubscribe?.();
   }, []);
-
-  // Animate progress bar when processing
-  useEffect(() => {
-    if (isProcessing && recordingDuration > 0) {
-      // Estimate: processing takes about 1/12.5 of the recording time
-      const estimatedDuration = (recordingDuration / 12.5) * 1000; // in ms
-      const updateInterval = 50; // update every 50ms
-      const totalSteps = estimatedDuration / updateInterval;
-      let currentStep = 0;
-
-      // Clear any existing interval
-      if (progressIntervalRef.current) {
-        clearInterval(progressIntervalRef.current);
-      }
-
-      progressIntervalRef.current = setInterval(() => {
-        currentStep++;
-        // Use easeOutQuad for a natural feel - starts fast, slows down near end
-        const linearProgress = currentStep / totalSteps;
-        // Cap at 95% to show it's still working until actual completion
-        const easedProgress = Math.min(95, linearProgress * 100 * (2 - linearProgress));
-        setProgress(easedProgress);
-
-        if (currentStep >= totalSteps) {
-          // Don't clear interval, keep it at 95% until actual completion
-          if (progressIntervalRef.current) {
-            clearInterval(progressIntervalRef.current);
-          }
-        }
-      }, updateInterval);
-
-      return () => {
-        if (progressIntervalRef.current) {
-          clearInterval(progressIntervalRef.current);
-        }
-      };
-    } else if (!isProcessing) {
-      if (progressIntervalRef.current) {
-        clearInterval(progressIntervalRef.current);
-      }
-    }
-  }, [isProcessing, recordingDuration]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -280,39 +228,7 @@ export default function TranscriptionPage() {
           className="flex-1 p-4 overflow-y-auto"
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         >
-          {isProcessing ? (
-            <div className="h-full flex flex-col items-center justify-center gap-4">
-              <div className="flex items-center gap-3">
-                <svg className="w-5 h-5 text-orange-400 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                <p className="text-slate-300 text-base">Processing with Whisper...</p>
-              </div>
-
-              {/* Progress bar */}
-              <div className="w-full max-w-xs">
-                <div className="flex justify-between text-xs text-slate-500 mb-1.5">
-                  <span>Processing</span>
-                  <span>{Math.round(progress)}%</span>
-                </div>
-                <div className="h-2 bg-slate-700/50 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-orange-500 to-amber-400 rounded-full transition-all duration-100 ease-out"
-                    style={{
-                      width: `${progress}%`,
-                      boxShadow: progress > 0 ? '0 0 10px rgba(251, 146, 60, 0.5)' : 'none'
-                    }}
-                  />
-                </div>
-                {recordingDuration > 0 && (
-                  <p className="text-xs text-slate-500 mt-1.5 text-center">
-                    ~{Math.max(1, Math.ceil((recordingDuration / 12.5) * (1 - progress / 100)))}s remaining
-                  </p>
-                )}
-              </div>
-            </div>
-          ) : displayText ? (
+          {displayText ? (
             <p className="text-slate-100 text-base leading-relaxed whitespace-pre-wrap">
               {displayText}
               {interim && (
