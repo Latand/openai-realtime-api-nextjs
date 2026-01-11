@@ -33,6 +33,7 @@ interface UseTranscriptionReturn {
   retryAllPending: () => Promise<TranscriptionResult[]>;
   getPendingTranscriptions: () => Promise<PendingTranscription[]>;
   clearPendingTranscription: (id: string) => Promise<void>;
+  analyser: AnalyserNode | null;
 }
 
 export default function useTranscription(
@@ -43,10 +44,12 @@ export default function useTranscription(
   const [error, setError] = useState<string | null>(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [recordingDuration, setRecordingDuration] = useState(0);
+  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const recordingStartTimeRef = useRef<number>(0);
 
   // Sync state with overlay window
@@ -152,6 +155,17 @@ export default function useTranscription(
       });
 
       streamRef.current = stream;
+      
+      // Setup Analyser for visualization
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyserNode = audioContext.createAnalyser();
+      analyserNode.fftSize = 2048;
+      source.connect(analyserNode);
+      
+      audioContextRef.current = audioContext;
+      setAnalyser(analyserNode);
+
       audioChunksRef.current = [];
 
       const mediaRecorder = new MediaRecorder(stream, {
@@ -195,6 +209,13 @@ export default function useTranscription(
           streamRef.current.getTracks().forEach((track) => track.stop());
           streamRef.current = null;
         }
+
+        // Clean up AudioContext
+        if (audioContextRef.current) {
+          audioContextRef.current.close().catch(console.error);
+          audioContextRef.current = null;
+        }
+        setAnalyser(null);
 
         // Play sound to indicate recording stopped, now processing
         playSound("/sounds/transcription-processing.mp3");
@@ -360,5 +381,6 @@ export default function useTranscription(
     retryAllPending,
     getPendingTranscriptions: getAllPendingTranscriptions,
     clearPendingTranscription,
+    analyser,
   };
 }

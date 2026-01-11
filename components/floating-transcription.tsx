@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { Wand2 } from "lucide-react";
-import { AudioVisualizer } from "@/components/audio-visualizer";
 
 interface FloatingTranscriptionProps {
   isActive: boolean;
@@ -11,7 +10,6 @@ interface FloatingTranscriptionProps {
   transcription: string;
   interimTranscription: string;
   error: string | null;
-  currentVolume?: number; // Added optional volume prop
   onStop: () => void;
   onClear: () => void;
   onCopy: () => void;
@@ -24,7 +22,6 @@ export function FloatingTranscription({
   transcription,
   interimTranscription,
   error,
-  currentVolume = 0,
   onStop,
   onClear,
   onCopy,
@@ -141,18 +138,6 @@ export function FloatingTranscription({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-purple-600/20 to-pink-600/20 border-b border-slate-700/50 relative overflow-hidden">
-          
-          {/* Visualizer Background (only when active) */}
-          {isActive && (
-            <div className="absolute inset-0 opacity-20 pointer-events-none">
-              <AudioVisualizer 
-                currentVolume={currentVolume} 
-                isSessionActive={true} 
-                color="#a855f7" // Purple
-              />
-            </div>
-          )}
-
           <div className="flex items-center gap-3 relative z-10">
             {/* Recording indicator */}
             <div className="relative">

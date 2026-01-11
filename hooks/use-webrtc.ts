@@ -43,6 +43,8 @@ interface UseWebRTCAudioSessionReturn {
   registerFunction: (name: string, fn: ToolHandler) => void;
   msgs: any[];
   currentVolume: number;
+  userAnalyser: AnalyserNode | null;
+  assistantAnalyser: AnalyserNode | null;
   conversation: Conversation[];
   sendTextMessage: (text: string) => void;
   sendFunctionOutput: (callId: string, output: any) => boolean;
@@ -179,7 +181,10 @@ export default function useWebRTCAudioSession(
 
   // Volume analysis (assistant inbound audio)
   const [currentVolume, setCurrentVolume] = useState(0);
-  const analyserRef = useRef<AnalyserNode | null>(null);
+  const [userAnalyser, setUserAnalyser] = useState<AnalyserNode | null>(null);
+  const [assistantAnalyser, setAssistantAnalyser] = useState<AnalyserNode | null>(null);
+  const userAnalyserRef = useRef<AnalyserNode | null>(null);
+  const assistantAnalyserRef = useRef<AnalyserNode | null>(null);
   const volumeIntervalRef = useRef<number | null>(null);
   const animationFrameRef = useRef<number | null>(null);
 
@@ -568,8 +573,12 @@ export default function useWebRTCAudioSession(
     const audioContext = new AudioContext();
     const source = audioContext.createMediaStreamSource(stream);
     const analyzer = audioContext.createAnalyser();
-    analyzer.fftSize = 256;
+    analyzer.fftSize = 2048;
     source.connect(analyzer);
+    
+    setUserAnalyser(analyzer);
+    userAnalyserRef.current = analyzer;
+
     const bufferLength = analyzer.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
     const updateIndicator = () => {
@@ -589,9 +598,9 @@ export default function useWebRTCAudioSession(
    * Calculate RMS volume from inbound assistant audio.
    */
   function getVolume(): number {
-    if (!analyserRef.current) return 0;
-    const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-    analyserRef.current.getByteTimeDomainData(dataArray);
+    if (!assistantAnalyserRef.current) return 0;
+    const dataArray = new Uint8Array(assistantAnalyserRef.current.frequencyBinCount);
+    assistantAnalyserRef.current.getByteTimeDomainData(dataArray);
     let sum = 0;
     for (let i = 0; i < dataArray.length; i++) {
       const float = (dataArray[i] - 128) / 128;
@@ -674,9 +683,12 @@ export default function useWebRTCAudioSession(
         inboundAudioContextRef.current = inboundAudioCtx;
         const src = inboundAudioCtx.createMediaStreamSource(event.streams[0]);
         const inboundAnalyzer = inboundAudioCtx.createAnalyser();
-        inboundAnalyzer.fftSize = 256;
+        inboundAnalyzer.fftSize = 1024;
         src.connect(inboundAnalyzer);
-        analyserRef.current = inboundAnalyzer;
+        
+        setAssistantAnalyser(inboundAnalyzer);
+        assistantAnalyserRef.current = inboundAnalyzer;
+
         if (volumeIntervalRef.current) {
           clearInterval(volumeIntervalRef.current);
         }
@@ -783,7 +795,10 @@ export default function useWebRTCAudioSession(
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
     }
-    analyserRef.current = null;
+    setUserAnalyser(null);
+    userAnalyserRef.current = null;
+    setAssistantAnalyser(null);
+    assistantAnalyserRef.current = null;
     ephemeralUserMessageIdRef.current = null;
     lastSessionUpdateRef.current = null;
     setCurrentVolume(0);
@@ -907,6 +922,8 @@ export default function useWebRTCAudioSession(
     registerFunction,
     msgs,
     currentVolume,
+    userAnalyser,
+    assistantAnalyser,
     conversation,
     sendTextMessage,
     sendFunctionOutput,

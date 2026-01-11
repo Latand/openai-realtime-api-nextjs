@@ -25,6 +25,7 @@ asarUnpack:
 publish: null
 win:
   target: nsis
+  icon: resources/icons/icon.ico
 mac:
   target:
     - dmg

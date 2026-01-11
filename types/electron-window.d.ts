@@ -151,6 +151,8 @@ declare global {
         clear: () => Promise<{ success: boolean }>;
         updateText: (text: string, interim: string) => Promise<{ success: boolean }>;
         updateState: (state: { isListening?: boolean; isRecording: boolean; isProcessing: boolean; recordingDuration: number }) => Promise<{ success: boolean }>;
+        startDrag: () => Promise<{ success: boolean; x?: number; y?: number }>;
+        moveWindow: (deltaX: number, deltaY: number) => Promise<{ success: boolean }>;
         onTextUpdate: (callback: (data: { text: string; interim: string }) => void) => () => void;
         onStateUpdate: (callback: (data: { isListening?: boolean; isRecording: boolean; isProcessing: boolean; recordingDuration: number }) => void) => () => void;
         onWindowClosed: (callback: () => void) => () => void;

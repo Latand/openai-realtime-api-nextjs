@@ -160,6 +160,7 @@ function useWakeWordConfig(
   handleWakeWord: () => void,
   sessionActive: boolean,
   enabled: boolean,
+  accessKey: string,
   deviceId?: string
 ): WakeWordConfig {
   const porcupineModel = useMemo(
@@ -190,10 +191,10 @@ function useWakeWordConfig(
       onWakeWord: handleWakeWord,
       porcupineModel,
       keywords,
-      accessKey: process.env.NEXT_PUBLIC_PICOVOICE_ACCESS_KEY || "",
+      accessKey,
       deviceId,
     }),
-    [enabled, handleWakeWord, sessionActive, porcupineModel, keywords, deviceId]
+    [enabled, handleWakeWord, sessionActive, porcupineModel, keywords, accessKey, deviceId]
   );
 }
 
@@ -219,6 +220,8 @@ function AppContent() {
   // State management
   const [voice] = useState("coral"); // TODO: Add voice selection to settings page
   const [selectedMicrophoneId, setSelectedMicrophoneId] = useState<string>("");
+  const [microphoneLoaded, setMicrophoneLoaded] = useState(false);
+  const [picovoiceAccessKey, setPicovoiceAccessKey] = useState<string>("");
   const [manualStop, setManualStop] = useState(false);
   const [autoWakeWordEnabled, setAutoWakeWordEnabled] = useState(true);
   const [justReinitialized, setJustReinitialized] = useState(false);
@@ -259,6 +262,7 @@ function AppContent() {
     isProcessing: isWhisperProcessing,
     startRecording: startWhisperRecording,
     stopRecording: stopWhisperRecording,
+    analyser: whisperAnalyser,
   } = useTranscription(selectedMicrophoneId);
 
   const whisperStartTimeRef = useRef<number>(0);
@@ -305,6 +309,49 @@ function AppContent() {
     loadMemory();
   }, [loadMemory]);
 
+  // Load saved microphone selection and API keys on mount
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        // Load microphone
+        const result = await window.electron?.settings?.load?.();
+        if (result?.success && result.settings?.selectedMicrophoneId) {
+          debug("[Settings] Loaded saved microphone:", result.settings.selectedMicrophoneId);
+          setSelectedMicrophoneId(result.settings.selectedMicrophoneId as string);
+        }
+
+        // Load Picovoice key
+        const apiKeys = await window.electron?.settings?.getApiKey?.();
+        if (apiKeys?.picovoiceKey) {
+          debug("[Settings] Loaded Picovoice key");
+          setPicovoiceAccessKey(apiKeys.picovoiceKey);
+        } else if (process.env.NEXT_PUBLIC_PICOVOICE_ACCESS_KEY) {
+          // Fallback to env var for dev mode
+          setPicovoiceAccessKey(process.env.NEXT_PUBLIC_PICOVOICE_ACCESS_KEY);
+        }
+      } catch (err) {
+        console.error("[Settings] Failed to load settings:", err);
+      } finally {
+        setMicrophoneLoaded(true);
+      }
+    };
+    loadSettings();
+  }, []);
+
+  // Save microphone selection when it changes (only after initial load)
+  useEffect(() => {
+    if (!microphoneLoaded) return;
+    const saveMicrophone = async () => {
+      try {
+        await window.electron?.settings?.save?.({ selectedMicrophoneId });
+        debug("[Settings] Saved microphone selection:", selectedMicrophoneId);
+      } catch (err) {
+        console.error("[Settings] Failed to save microphone:", err);
+      }
+    };
+    saveMicrophone();
+  }, [selectedMicrophoneId, microphoneLoaded]);
+
   debug("AppContent initialized with voice:", voice);
 
   const toolsFunctions = useToolsFunctions();
@@ -324,7 +371,8 @@ function AppContent() {
     clearConversation,
     isMuted,
     toggleMute,
-    currentVolume,
+    userAnalyser,
+    assistantAnalyser,
   } = useWebRTCAudioSession(voice, tools, mcpDefinitions, previousConversations, selectedMicrophoneId, systemPrompt);
 
   const prevSessionActiveRef = useRef(isSessionActive);
@@ -717,6 +765,7 @@ function AppContent() {
     handleWakeWord,
     isSessionActive,
     wakeWordEnabled,
+    picovoiceAccessKey,
     selectedMicrophoneId
   );
 
@@ -937,19 +986,21 @@ function AppContent() {
 
   return (
     <main className="h-screen w-screen flex flex-col bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 overflow-hidden relative">
-      {/* Main Content */}
-      <div className="flex flex-col items-center gap-4 max-w-md mx-auto w-full px-4 pt-16 pb-2 flex-1">
-        {/* Visualizer & Broadcast Button */}
-        <div className="w-full flex flex-col items-center justify-center py-4 relative flex-1">
-          {/* Visualizer Background */}
-          <div className="absolute inset-0 flex items-center justify-center opacity-30 pointer-events-none">
-             <AudioVisualizer
-                currentVolume={currentVolume}
-                isSessionActive={isSessionActive}
-                color={isSessionActive ? "#f59e0b" : "#64748b"}
-             />
-          </div>
+      {/* Background Visualizer */}
+      <div className="absolute inset-0 z-0">
+        <AudioVisualizer
+          userAnalyser={userAnalyser}
+          assistantAnalyser={assistantAnalyser}
+          whisperAnalyser={whisperAnalyser}
+          isSessionActive={isSessionActive}
+          isWhisperActive={isWhisperRecording}
+        />
+      </div>
 
+      {/* Main Content */}
+      <div className="flex flex-col items-center gap-4 max-w-md mx-auto w-full px-4 pt-16 pb-2 flex-1 relative z-10">
+        {/* Broadcast Button */}
+        <div className="w-full flex flex-col items-center justify-center py-4 relative flex-1">
           <div className="z-10 flex items-center gap-3">
             <BroadcastButton
               isSessionActive={isSessionActive}

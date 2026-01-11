@@ -20,9 +20,14 @@ export default function TranscriptionPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isImproving, setIsImproving] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [progress, setProgress] = useState(0);
   const [newTextStart, setNewTextStart] = useState<number | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const textRef = useRef<HTMLDivElement>(null);
   const fadeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Listen for text updates from main window
   useEffect(() => {
@@ -60,15 +65,63 @@ export default function TranscriptionPage() {
   // Listen for state updates (listening/recording/processing)
   useEffect(() => {
     const unsubscribe = window.electron?.transcription?.onStateUpdate(
-      (data: { isListening?: boolean; isRecording: boolean; isProcessing: boolean }) => {
+      (data: { isListening?: boolean; isRecording: boolean; isProcessing: boolean; recordingDuration: number }) => {
         console.log("[Transcription] Received state update:", data);
         setIsListening(data.isListening ?? false);
         setIsRecording(data.isRecording);
         setIsProcessing(data.isProcessing);
+        setRecordingDuration(data.recordingDuration || 0);
+
+        if (data.isProcessing) {
+          setProgress(0);
+        } else if (!data.isProcessing && data.recordingDuration > 0) {
+          setProgress(100);
+        }
       }
     );
     return () => unsubscribe?.();
   }, []);
+
+  // Animate progress bar when processing
+  useEffect(() => {
+    if (isProcessing && recordingDuration > 0) {
+      // Estimate: processing takes about 1/12.5 of the recording time
+      const estimatedDuration = (recordingDuration / 12.5) * 1000; // in ms
+      const updateInterval = 50; // update every 50ms
+      const totalSteps = estimatedDuration / updateInterval;
+      let currentStep = 0;
+
+      // Clear any existing interval
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+      }
+
+      progressIntervalRef.current = setInterval(() => {
+        currentStep++;
+        // Use easeOutQuad for a natural feel - starts fast, slows down near end
+        const linearProgress = currentStep / totalSteps;
+        // Cap at 95% to show it's still working until actual completion
+        const easedProgress = Math.min(95, linearProgress * 100 * (2 - linearProgress));
+        setProgress(easedProgress);
+
+        if (currentStep >= totalSteps) {
+          if (progressIntervalRef.current) {
+            clearInterval(progressIntervalRef.current);
+          }
+        }
+      }, updateInterval);
+
+      return () => {
+        if (progressIntervalRef.current) {
+          clearInterval(progressIntervalRef.current);
+        }
+      };
+    } else if (!isProcessing) {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+      }
+    }
+  }, [isProcessing, recordingDuration]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -76,6 +129,44 @@ export default function TranscriptionPage() {
       textRef.current.scrollTop = textRef.current.scrollHeight;
     }
   }, [text, interim]);
+
+  // Manual window dragging
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest("button")) return;
+    e.preventDefault();
+    console.log("[Drag] Starting drag at", e.screenX, e.screenY);
+    setIsDragging(true);
+    dragStartRef.current = { x: e.screenX, y: e.screenY };
+    window.electron?.transcription?.startDrag?.();
+  }, []);
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!dragStartRef.current) return;
+      const deltaX = e.screenX - dragStartRef.current.x;
+      const deltaY = e.screenY - dragStartRef.current.y;
+      if (deltaX !== 0 || deltaY !== 0) {
+        console.log("[Drag] Moving", deltaX, deltaY);
+        dragStartRef.current = { x: e.screenX, y: e.screenY };
+        window.electron?.transcription?.moveWindow?.(deltaX, deltaY);
+      }
+    };
+
+    const handleMouseUp = () => {
+      console.log("[Drag] End drag");
+      setIsDragging(false);
+      dragStartRef.current = null;
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDragging]);
 
   // Copy to clipboard
   const handleCopy = useCallback(async () => {
@@ -166,16 +257,25 @@ export default function TranscriptionPage() {
   const displayText = text || "";
   const hasText = displayText.length > 0;
 
+  // Format duration as MM:SS
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   return (
     <main
       className="fixed inset-0 select-none overflow-hidden m-0 p-2"
-      style={{ WebkitAppRegion: "drag", background: "transparent" } as React.CSSProperties}
+      style={{ background: "transparent" } as React.CSSProperties}
     >
-      <div className="h-full w-full flex flex-col bg-gradient-to-br from-slate-900/95 to-slate-800/95 rounded-2xl border border-slate-600/50 shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden backdrop-blur-xl">
-        {/* Header */}
+      <div
+        className="h-full w-full flex flex-col bg-gradient-to-br from-slate-900/95 to-slate-800/95 rounded-2xl border border-slate-600/50 shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden backdrop-blur-xl"
+      >
+        {/* Header - draggable */}
         <div
-          className="flex items-center justify-between px-4 py-2.5 bg-slate-800/50 border-b border-slate-700/50"
-          style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+          className="flex items-center justify-between px-4 py-2.5 bg-slate-800/50 border-b border-slate-700/50 cursor-move"
+          onMouseDown={handleDragStart}
         >
           <div className="flex items-center gap-2.5">
             <div className="relative flex items-center justify-center">
@@ -199,14 +299,11 @@ export default function TranscriptionPage() {
               )}
             </div>
             <span className="text-sm font-medium text-slate-300">
-              {isProcessing ? 'Processing' : isRecording ? 'Recording' : isListening ? 'Listening...' : 'Paused'}
+              {isProcessing ? 'Processing...' : isRecording ? `Recording ${formatDuration(recordingDuration)}` : isListening ? 'Listening...' : 'Paused'}
             </span>
           </div>
 
-          <div
-            className="flex items-center gap-1"
-            style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-          >
+          <div className="flex items-center gap-1">
             {/* Show Stop button only if listening/recording/processing */}
             {(isListening || isRecording || isProcessing) && (
                 <button
@@ -231,9 +328,40 @@ export default function TranscriptionPage() {
         <div
           ref={textRef}
           className="flex-1 p-4 overflow-y-auto"
-          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         >
-          {displayText ? (
+          {isProcessing ? (
+            <div className="h-full flex flex-col items-center justify-center gap-4">
+              <div className="flex items-center gap-3">
+                <svg className="w-5 h-5 text-orange-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                <p className="text-slate-300 text-base">Processing with Whisper...</p>
+              </div>
+
+              {/* Progress bar */}
+              <div className="w-full max-w-xs">
+                <div className="flex justify-between text-xs text-slate-500 mb-1.5">
+                  <span>Processing</span>
+                  <span>{Math.round(progress)}%</span>
+                </div>
+                <div className="h-2 bg-slate-700/50 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-orange-500 to-amber-400 rounded-full transition-all duration-100 ease-out"
+                    style={{
+                      width: `${progress}%`,
+                      boxShadow: progress > 0 ? '0 0 10px rgba(251, 146, 60, 0.5)' : 'none'
+                    }}
+                  />
+                </div>
+                {recordingDuration > 0 && (
+                  <p className="text-xs text-slate-500 mt-1.5 text-center">
+                    ~{Math.max(1, Math.ceil((recordingDuration / 12.5) * (1 - progress / 100)))}s remaining
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : displayText ? (
             <p className="text-slate-100 text-base leading-relaxed whitespace-pre-wrap">
               {newTextStart !== null && newTextStart < displayText.length ? (
                 <>
@@ -259,10 +387,7 @@ export default function TranscriptionPage() {
         </div>
 
         {/* Actions */}
-        <div
-          className="flex items-center gap-2 px-3 py-2.5 bg-slate-800/60 border-t border-slate-700/50"
-          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-        >
+        <div className="flex items-center gap-2 px-3 py-2.5 bg-slate-800/60 border-t border-slate-700/50">
           {/* Magic Wand Improve Button */}
           {hasText && (
             <button

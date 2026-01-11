@@ -369,6 +369,36 @@ app.on("ready", async () => {
     return { success: true };
   });
 
+  ipcMain.handle("transcription:stop", () => {
+    // Notify main window to stop transcription
+    mainWindow?.webContents.send("transcription:stop");
+    return { success: true };
+  });
+
+  ipcMain.handle("transcription:startDrag", () => {
+    console.log("[Drag] startDrag called, window exists:", !!transcriptionWindow);
+    if (transcriptionWindow) {
+      transcriptionWindow.setMovable(true);
+      const [x, y] = transcriptionWindow.getPosition();
+      console.log("[Drag] Window position:", x, y);
+      return { success: true, x, y };
+    }
+    return { success: false };
+  });
+
+  ipcMain.handle("transcription:moveWindow", (_, deltaX: number, deltaY: number) => {
+    if (transcriptionWindow) {
+      const [currentX, currentY] = transcriptionWindow.getPosition();
+      const newX = currentX + deltaX;
+      const newY = currentY + deltaY;
+      console.log("[Drag] Moving window:", { deltaX, deltaY, currentX, currentY, newX, newY });
+      transcriptionWindow.setPosition(newX, newY);
+      return { success: true };
+    }
+    console.log("[Drag] moveWindow called but no window");
+    return { success: false };
+  });
+
   // Text Improvement window handlers
   ipcMain.handle("textImprovement:openWindow", async (_, initialText?: string) => {
     console.log("[TextImprovement] openWindow called, initialText length:", initialText?.length || 0);

@@ -97,6 +97,9 @@ contextBridge.exposeInMainWorld("electron", {
       ipcRenderer.invoke("transcription:updateText", text, interim),
     updateState: (state: { isListening?: boolean; isRecording: boolean; isProcessing: boolean; recordingDuration: number }) =>
       ipcRenderer.invoke("transcription:updateState", state),
+    startDrag: () => ipcRenderer.invoke("transcription:startDrag"),
+    moveWindow: (deltaX: number, deltaY: number) =>
+      ipcRenderer.invoke("transcription:moveWindow", deltaX, deltaY),
     onTextUpdate: (callback: (data: { text: string; interim: string }) => void) => {
       const handler = (_event: IpcRendererEvent, data: { text: string; interim: string }) => callback(data);
       ipcRenderer.on("transcription:textUpdate", handler);
