@@ -43,28 +43,48 @@ async function startNextServer(): Promise<string> {
     return nextServerUrl;
   }
 
-  const appPath = app.getAppPath();
-  const nextApp = next({ dev: false, dir: appPath });
-  const handle = nextApp.getRequestHandler();
+  // In production, asarUnpack puts files in app.asar.unpacked
+  let appPath = app.getAppPath();
+  if (app.isPackaged && appPath.includes("app.asar")) {
+    appPath = appPath.replace("app.asar", "app.asar.unpacked");
+  }
 
-  await nextApp.prepare();
+  console.log("[NextServer] Starting Next.js server...");
+  console.log("[NextServer] App path:", appPath);
+  console.log("[NextServer] Is packaged:", app.isPackaged);
 
-  nextServer = createServer((req, res) => {
-    handle(req, res);
-  });
+  try {
+    const nextApp = next({ dev: false, dir: appPath });
+    const handle = nextApp.getRequestHandler();
 
-  return new Promise((resolve, reject) => {
-    nextServer?.once("error", reject);
-    nextServer?.listen(0, "127.0.0.1", () => {
-      const address = nextServer?.address();
-      if (address && typeof address === "object") {
-        nextServerUrl = `http://127.0.0.1:${address.port}`;
-        resolve(nextServerUrl);
-        return;
-      }
-      reject(new Error("Failed to start Next.js server"));
+    console.log("[NextServer] Preparing Next.js app...");
+    await nextApp.prepare();
+    console.log("[NextServer] Next.js app prepared successfully");
+
+    nextServer = createServer((req, res) => {
+      handle(req, res);
     });
-  });
+
+    return new Promise((resolve, reject) => {
+      nextServer?.once("error", (err) => {
+        console.error("[NextServer] Server error:", err);
+        reject(err);
+      });
+      nextServer?.listen(0, "127.0.0.1", () => {
+        const address = nextServer?.address();
+        if (address && typeof address === "object") {
+          nextServerUrl = `http://127.0.0.1:${address.port}`;
+          console.log("[NextServer] Server started at:", nextServerUrl);
+          resolve(nextServerUrl);
+          return;
+        }
+        reject(new Error("Failed to start Next.js server"));
+      });
+    });
+  } catch (error) {
+    console.error("[NextServer] Failed to start:", error);
+    throw error;
+  }
 }
 
 async function stopNextServer() {
@@ -107,10 +127,15 @@ async function createMainWindow(): Promise<BrowserWindow> {
     }, 1000);
   } else {
     try {
+      console.log("[MainWindow] Starting production mode...");
       const serverUrl = await startNextServer();
+      console.log("[MainWindow] Loading URL:", serverUrl);
       await window.loadURL(serverUrl);
+      console.log("[MainWindow] URL loaded successfully");
     } catch (error) {
-      console.error("Failed to start Next.js server:", error);
+      console.error("[MainWindow] Failed to start Next.js server:", error);
+      // Show error page in window
+      window.webContents.loadURL(`data:text/html,<html><body style="background:#1e1e1e;color:#fff;font-family:sans-serif;padding:20px;"><h1>Failed to start</h1><pre>${String(error)}</pre></body></html>`);
     }
   }
 

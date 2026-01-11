@@ -9,10 +9,19 @@ files:
     filter:
       - package.json
       - dist-electron
+      - "!.next"
       - .next
+      - .next/**/*
       - public
       - next.config.js
-      - app
+      - "!node_modules"
+      - node_modules
+      - node_modules/**/*
+asarUnpack:
+  - .next/**/*
+  - node_modules/**/*
+  - public/**/*
+  - next.config.js
 publish: null
 win:
   target: nsis
