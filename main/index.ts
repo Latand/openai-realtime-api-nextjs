@@ -19,6 +19,7 @@ import { execFile, spawn, exec } from "child_process";
 import * as fs from "fs";
 import { promisify } from "util";
 import { mcpService } from "./mcp-service";
+import { createTray } from "./tray";
 
 const execFileAsync = promisify(execFile);
 const execAsync = promisify(exec);
@@ -285,8 +286,22 @@ async function createTextImprovementWindow(initialText?: string): Promise<Browse
 }
 
 // Create main BrowserWindow when electron is ready
+// Type assertion for isQuitting flag
+const appWithQuitting = app as typeof app & { isQuitting?: boolean };
+
 app.on("ready", async () => {
   mainWindow = await createMainWindow();
+
+  // Create system tray
+  createTray(mainWindow);
+
+  // Handle window close - hide to tray instead of quitting
+  mainWindow.on("close", (event) => {
+    if (!appWithQuitting.isQuitting) {
+      event.preventDefault();
+      mainWindow?.hide();
+    }
+  });
 
   // Initialize MCP service
   await mcpService.initialize();

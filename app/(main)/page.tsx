@@ -932,7 +932,7 @@ function AppContent() {
   return (
     <main className="h-screen w-screen flex flex-col bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 overflow-hidden relative">
       {/* Main Content */}
-      <div className="flex flex-col items-center gap-4 max-w-md mx-auto w-full px-4 pt-4 pb-2 flex-1">
+      <div className="flex flex-col items-center gap-4 max-w-md mx-auto w-full px-4 pt-16 pb-2 flex-1">
         {/* Visualizer & Broadcast Button */}
         <div className="w-full flex flex-col items-center justify-center py-4 relative flex-1">
           {/* Visualizer Background */}
@@ -954,23 +954,14 @@ function AppContent() {
           <SessionTimer isActive={isSessionActive} />
         </div>
 
-        {/* Action Buttons Row */}
-        <div className="flex items-center gap-2 w-full justify-center flex-wrap">
+        {/* Action Buttons Row - Operational Controls */}
+        <div className="flex items-center justify-center p-2 bg-slate-900/40 backdrop-blur-xl border border-white/5 rounded-2xl gap-3 shadow-2xl ring-1 ring-white/5">
           
-          {/* Settings Button */}
-          <Link
-            href="/settings"
-            className="group p-2.5 bg-slate-800/60 hover:bg-slate-700/80 border border-slate-600/40 hover:border-slate-500/60 text-slate-400 hover:text-white rounded-lg transition-all duration-200"
-            title="Settings"
-          >
-            <Settings className="w-5 h-5" />
-          </Link>
-
           {/* Microphone Selector */}
           <Dialog>
             <DialogTrigger asChild>
               <button
-                className="group p-2.5 bg-slate-800/60 hover:bg-slate-700/80 border border-slate-600/40 hover:border-slate-500/60 text-slate-400 hover:text-white rounded-lg transition-all duration-200"
+                className="group p-3 bg-slate-800/50 hover:bg-slate-700/70 border border-slate-600/30 hover:border-slate-500/50 text-slate-400 hover:text-white rounded-xl transition-all duration-200 hover:scale-105 active:scale-95"
                 title="Select Microphone"
               >
                 <Mic className="w-5 h-5" />
@@ -990,49 +981,21 @@ function AppContent() {
             </DialogContent>
           </Dialog>
 
-          {/* Shortcuts Hint */}
-          <ShortcutsHint />
-
           {/* Divider */}
-          <div className="w-px h-6 bg-slate-700/50 mx-1" />
-
-          {/* Transcript Button */}
-          <button
-            onClick={() => setIsTranscriptOpen(true)}
-            className="group p-2.5 bg-slate-800/60 hover:bg-slate-700/80 border border-slate-600/40 hover:border-slate-500/60 text-slate-400 hover:text-white rounded-lg transition-all duration-200"
-            title="Transcript history"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-            </svg>
-          </button>
-
-          {/* Memories Button */}
-          <button
-            onClick={() => setIsSummariesOpen(true)}
-            className="group p-2.5 bg-slate-800/60 hover:bg-blue-600/30 border border-slate-600/40 hover:border-blue-400/50 text-slate-400 hover:text-blue-300 rounded-lg transition-all duration-200"
-            title="Memories & Settings"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
-            </svg>
-          </button>
-
-          {/* Divider */}
-          <div className="w-px h-6 bg-slate-700/50 mx-1" />
+          <div className="w-px h-8 bg-white/10 mx-1" />
 
           {/* Real-time Transcription Button (Ctrl+Shift+T) */}
           <button
             onClick={handleTranscriptionToggle}
             disabled={isSessionActive}
-            className={`group p-2.5 rounded-lg transition-all duration-200 ${
+            className={`group p-3 rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 ${
               isTranscribing
-                ? "bg-red-500/30 hover:bg-red-500/40 border border-red-400/50 text-red-400"
+                ? "bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-400 shadow-[0_0_15px_rgba(239,68,68,0.2)]"
                 : isTranscribingConnecting
                 ? "bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 cursor-wait"
                 : isSessionActive
-                ? "bg-slate-800/40 border border-slate-700/30 text-slate-600 cursor-not-allowed opacity-50"
-                : "bg-slate-800/60 hover:bg-purple-600/30 border border-slate-600/40 hover:border-purple-400/50 text-slate-400 hover:text-purple-300"
+                ? "bg-slate-800/30 border border-slate-700/20 text-slate-600 cursor-not-allowed opacity-50"
+                : "bg-slate-800/50 hover:bg-purple-500/20 border border-slate-600/30 hover:border-purple-400/30 text-slate-400 hover:text-purple-300"
             }`}
             title={isTranscribing ? "Stop Live (Ctrl+Shift+T)" : "Live transcription (Ctrl+Shift+T)"}
           >
@@ -1049,14 +1012,14 @@ function AppContent() {
           <button
             onClick={handleWhisperToggle}
             disabled={isSessionActive || isTranscribing}
-            className={`group p-2.5 rounded-lg transition-all duration-200 ${
+            className={`group p-3 rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 ${
               isWhisperRecording
-                ? "bg-red-500/30 hover:bg-red-500/40 border border-red-400/50 text-red-400"
+                ? "bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-400 shadow-[0_0_15px_rgba(239,68,68,0.2)]"
                 : isWhisperProcessing
                 ? "bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 cursor-wait"
                 : isSessionActive || isTranscribing
-                ? "bg-slate-800/40 border border-slate-700/30 text-slate-600 cursor-not-allowed opacity-50"
-                : "bg-slate-800/60 hover:bg-orange-600/30 border border-slate-600/40 hover:border-orange-400/50 text-slate-400 hover:text-orange-300"
+                ? "bg-slate-800/30 border border-slate-700/20 text-slate-600 cursor-not-allowed opacity-50"
+                : "bg-slate-800/50 hover:bg-orange-500/20 border border-slate-600/30 hover:border-orange-400/30 text-slate-400 hover:text-orange-300"
             }`}
             title={isWhisperRecording ? "Stop Whisper (Ctrl+Shift+R)" : "Whisper transcription (Ctrl+Shift+R)"}
           >
@@ -1070,7 +1033,7 @@ function AppContent() {
           </button>
 
           {/* Divider */}
-          <div className="w-px h-6 bg-slate-700/50 mx-1" />
+          <div className="w-px h-8 bg-white/10 mx-1" />
 
           {/* Mute Button */}
           <button
@@ -1079,12 +1042,12 @@ function AppContent() {
               toast.info(isMuted ? "Microphone unmuted" : "Microphone muted");
             }}
             disabled={!isSessionActive}
-            className={`group p-2.5 rounded-lg transition-all duration-200 ${
+            className={`group p-3 rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 ${
               !isSessionActive
-                ? "bg-slate-800/40 border border-slate-700/30 text-slate-600 cursor-not-allowed opacity-50"
+                ? "bg-slate-800/30 border border-slate-700/20 text-slate-600 cursor-not-allowed opacity-50"
                 : isMuted
-                ? "bg-red-500/30 hover:bg-red-500/40 border border-red-400/50 text-red-400"
-                : "bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 hover:text-emerald-300"
+                ? "bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-400 shadow-[0_0_15px_rgba(239,68,68,0.2)]"
+                : "bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-400 hover:text-emerald-300"
             }`}
             title={isMuted ? "Unmute (Ctrl+Shift+M)" : "Mute (Ctrl+Shift+M)"}
           >
@@ -1154,6 +1117,43 @@ function AppContent() {
       {/* Cost Display - Top Left */}
       <div className="fixed top-4 left-4 z-20">
         <MinimalCostDisplay />
+      </div>
+
+      {/* Header Tools - Top Right */}
+      <div className="fixed top-4 right-4 z-20 flex items-center gap-2">
+        {/* Shortcuts Hint */}
+        <ShortcutsHint />
+
+        {/* Settings Button */}
+        <Link
+          href="/settings"
+          className="group p-2.5 bg-slate-800/60 hover:bg-slate-700/80 border border-slate-600/40 hover:border-slate-500/60 text-slate-400 hover:text-white rounded-lg transition-all duration-200"
+          title="Settings"
+        >
+          <Settings className="w-5 h-5" />
+        </Link>
+
+        {/* Transcript Button */}
+        <button
+          onClick={() => setIsTranscriptOpen(true)}
+          className="group p-2.5 bg-slate-800/60 hover:bg-slate-700/80 border border-slate-600/40 hover:border-slate-500/60 text-slate-400 hover:text-white rounded-lg transition-all duration-200"
+          title="Transcript history"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+          </svg>
+        </button>
+
+        {/* Memories Button */}
+        <button
+          onClick={() => setIsSummariesOpen(true)}
+          className="group p-2.5 bg-slate-800/60 hover:bg-blue-600/30 border border-slate-600/40 hover:border-blue-400/50 text-slate-400 hover:text-blue-300 rounded-lg transition-all duration-200"
+          title="Memories & Settings"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
+          </svg>
+        </button>
       </div>
 
       <TranscriptWindow
