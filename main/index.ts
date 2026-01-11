@@ -183,6 +183,8 @@ async function createTranscriptionWindow(): Promise<BrowserWindow> {
   const windowWidth = 450;
   const windowHeight = 300;
 
+  const isMac = process.platform === "darwin";
+
   const window = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
@@ -201,6 +203,11 @@ async function createTranscriptionWindow(): Promise<BrowserWindow> {
     skipTaskbar: true,
     show: false, // Don't show immediately - we'll use showInactive
     focusable: false, // Prevent focus stealing
+    // macOS specific - enable window to be movable by dragging background
+    ...(isMac && {
+      titleBarStyle: "customButtonsOnHover" as const,
+      trafficLightPosition: { x: -100, y: -100 }, // Hide traffic lights off-screen
+    }),
   });
 
   window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -235,6 +242,8 @@ async function createTextImprovementWindow(initialText?: string): Promise<Browse
   const windowCount = textImprovementWindows.size;
   const offset = windowCount * 30;
 
+  const isMac = process.platform === "darwin";
+
   const window = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
@@ -251,6 +260,11 @@ async function createTextImprovementWindow(initialText?: string): Promise<Browse
     alwaysOnTop: true,
     resizable: true,
     skipTaskbar: true,
+    // macOS specific - enable window to be movable by dragging background
+    ...(isMac && {
+      titleBarStyle: "customButtonsOnHover" as const,
+      trafficLightPosition: { x: -100, y: -100 }, // Hide traffic lights off-screen
+    }),
   });
 
   window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });

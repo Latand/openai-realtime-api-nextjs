@@ -16,7 +16,6 @@ export default function TranscriptionPage() {
   }, []);
   const [text, setText] = useState("");
   const [interim, setInterim] = useState("");
-  const [isDragging, setIsDragging] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -77,20 +76,6 @@ export default function TranscriptionPage() {
       textRef.current.scrollTop = textRef.current.scrollHeight;
     }
   }, [text, interim]);
-
-  // Handle window dragging
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest("button")) return;
-    setIsDragging(true);
-  }, []);
-
-  useEffect(() => {
-    if (!isDragging) return;
-
-    const handleMouseUp = () => setIsDragging(false);
-    document.addEventListener("mouseup", handleMouseUp);
-    return () => document.removeEventListener("mouseup", handleMouseUp);
-  }, [isDragging]);
 
   // Copy to clipboard
   const handleCopy = useCallback(async () => {
@@ -185,7 +170,6 @@ export default function TranscriptionPage() {
     <main
       className="fixed inset-0 select-none overflow-hidden m-0 p-2"
       style={{ WebkitAppRegion: "drag", background: "transparent" } as React.CSSProperties}
-      onMouseDown={handleMouseDown}
     >
       <div className="h-full w-full flex flex-col bg-gradient-to-br from-slate-900/95 to-slate-800/95 rounded-2xl border border-slate-600/50 shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden backdrop-blur-xl">
         {/* Header */}
