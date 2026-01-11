@@ -200,8 +200,13 @@ function useWakeWordConfig(
 
 function useSoundEffects(isSessionActive: boolean, justReinitialized: boolean) {
   useEffect(() => {
+    // Only play init sound once per session (not on every navigation)
+    const alreadyPlayed = sessionStorage.getItem("initSoundPlayed");
+    if (alreadyPlayed) return;
+
     const timer = setTimeout(() => {
       playSound("/sounds/application-start.mp3");
+      sessionStorage.setItem("initSoundPlayed", "true");
     }, INIT_SOUND_DELAY);
     return () => clearTimeout(timer);
   }, []);
@@ -313,21 +318,45 @@ function AppContent() {
   useEffect(() => {
     const loadSettings = async () => {
       try {
+        // Request microphone permission early to enumerate devices
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          stream.getTracks().forEach(track => track.stop());
+          debug("[Microphone] Permission granted");
+        } catch (err) {
+          console.warn("[Microphone] Permission denied or error:", err);
+        }
+
         // Load microphone
         const result = await window.electron?.settings?.load?.();
         if (result?.success && result.settings?.selectedMicrophoneId) {
           debug("[Settings] Loaded saved microphone:", result.settings.selectedMicrophoneId);
           setSelectedMicrophoneId(result.settings.selectedMicrophoneId as string);
+        } else {
+          // If no saved microphone, try to get the first available one
+          try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const audioInputs = devices.filter(d => d.kind === "audioinput");
+            if (audioInputs.length > 0) {
+              debug("[Settings] Auto-selecting first microphone:", audioInputs[0].label);
+              setSelectedMicrophoneId(audioInputs[0].deviceId);
+            }
+          } catch (err) {
+            console.warn("[Microphone] Failed to enumerate devices:", err);
+          }
         }
 
         // Load Picovoice key
         const apiKeys = await window.electron?.settings?.getApiKey?.();
         if (apiKeys?.picovoiceKey) {
-          debug("[Settings] Loaded Picovoice key");
+          debug("[Settings] Loaded Picovoice key, length:", apiKeys.picovoiceKey.length);
           setPicovoiceAccessKey(apiKeys.picovoiceKey);
         } else if (process.env.NEXT_PUBLIC_PICOVOICE_ACCESS_KEY) {
           // Fallback to env var for dev mode
+          debug("[Settings] Using env var Picovoice key");
           setPicovoiceAccessKey(process.env.NEXT_PUBLIC_PICOVOICE_ACCESS_KEY);
+        } else {
+          debug("[Settings] No Picovoice key found");
         }
       } catch (err) {
         console.error("[Settings] Failed to load settings:", err);
@@ -531,6 +560,11 @@ function AppContent() {
       toast.error("Stop real-time transcription first");
       return;
     }
+    // Check if microphone is selected (only when starting, not stopping)
+    if (!isWhisperRecording && !selectedMicrophoneId) {
+      toast.error("Please select a microphone first");
+      return;
+    }
 
     if (isWhisperRecording) {
       // Calculate recording duration before stopping
@@ -580,7 +614,7 @@ function AppContent() {
         toast.error("Failed to open transcription window");
       }
     }
-  }, [isSessionActive, isTranscribing, isTranscribingConnecting, isWhisperRecording, startWhisperRecording, stopWhisperRecording]);
+  }, [isSessionActive, isTranscribing, isTranscribingConnecting, isWhisperRecording, startWhisperRecording, stopWhisperRecording, selectedMicrophoneId]);
 
   // Handle smart transcription toggle (Ctrl+Shift+T)
   const handleTranscriptionToggle = useCallback(async () => {
@@ -591,6 +625,11 @@ function AppContent() {
     }
     if (isWhisperRecording || isWhisperProcessing) {
       toast.error("Stop Whisper recording first");
+      return;
+    }
+    // Check if microphone is selected (only when starting, not stopping)
+    if (!isTranscribing && !isTranscribingConnecting && !selectedMicrophoneId) {
+      toast.error("Please select a microphone first");
       return;
     }
 
@@ -622,7 +661,7 @@ function AppContent() {
         toast.error("Failed to open transcription window");
       }
     }
-  }, [isSessionActive, isTranscribing, isTranscribingConnecting, isWhisperRecording, isWhisperProcessing, startTranscription, stopTranscription, clearTranscription]);
+  }, [isSessionActive, isTranscribing, isTranscribingConnecting, isWhisperRecording, isWhisperProcessing, startTranscription, stopTranscription, clearTranscription, selectedMicrophoneId]);
 
   // Handle text improvement toggle (Ctrl+Shift+G)
   const handleTextImprovementToggle = useCallback(async () => {
@@ -745,6 +784,11 @@ function AppContent() {
       debug("Ignoring wake word trigger immediately after reinitialization.");
       return;
     }
+    if (!selectedMicrophoneId) {
+      debug("Ignoring wake word - no microphone selected.");
+      toast.error("Please select a microphone first");
+      return;
+    }
 
     sessionStoppedByLLMRef.current = false; // Clear LLM stop flag on wake word start
     playSound("/sounds/on-wakeword.mp3");
@@ -759,7 +803,7 @@ function AppContent() {
     stopWakeWordRef
       .current()
       .catch((err) => console.error("Error stopping wake word:", err));
-  }, [isSessionActive, isTranscribing, isTranscribingConnecting, justReinitialized, manualStop, startSession]);
+  }, [isSessionActive, isTranscribing, isTranscribingConnecting, justReinitialized, manualStop, startSession, selectedMicrophoneId]);
 
   const wakeWordConfig = useWakeWordConfig(
     handleWakeWord,
@@ -849,13 +893,17 @@ function AppContent() {
       toast.error("Stop transcription first to start voice session");
       return;
     }
+    if (!selectedMicrophoneId) {
+      toast.error("Please select a microphone first");
+      return;
+    }
     sessionStoppedByLLMRef.current = false; // Clear LLM stop flag on manual start
     setManualStop(false);
     setAutoWakeWordEnabled(true);
     setJustReinitialized(false);
     playSound("/sounds/on-wakeword.mp3");
     startSession();
-  }, [isSessionActive, isTranscribing, isTranscribingConnecting, startSession]);
+  }, [isSessionActive, isTranscribing, isTranscribingConnecting, startSession, selectedMicrophoneId]);
 
   const onButtonClick = useCallback(() => {
     debug("Button clicked with detected:", detected);
@@ -1034,6 +1082,7 @@ function AppContent() {
                   value={selectedMicrophoneId}
                   onValueChange={setSelectedMicrophoneId}
                   disabled={isSessionActive}
+                  settingsLoaded={microphoneLoaded}
                 />
               </div>
             </DialogContent>
@@ -1135,9 +1184,14 @@ function AppContent() {
 
         {/* Wake Word Status - compact */}
         <div className="text-center mt-2">
-          {wakeWordEnabled && wakeError && !wakeListening && !wakeReady && (
+          {wakeWordEnabled && !picovoiceAccessKey && (
+            <p className="text-amber-400 text-xs mb-1">
+              ⚠️ Wake word requires Picovoice key (Settings → API Keys)
+            </p>
+          )}
+          {wakeWordEnabled && wakeError && !wakeListening && !wakeReady && picovoiceAccessKey && (
             <p className="text-red-400 text-xs mb-1">
-              Error: {wakeError.message}
+              Wake word error: {wakeError.message}
             </p>
           )}
           <p className="text-xs text-slate-500">
