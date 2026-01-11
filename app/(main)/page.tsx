@@ -27,6 +27,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Settings } from "lucide-react";
+import Link from "next/link";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 
@@ -960,52 +961,13 @@ function AppContent() {
         <div className="flex items-center gap-2 w-full justify-center flex-wrap">
           
           {/* Settings Button */}
-          <Dialog>
-            <DialogTrigger asChild>
-              <button 
-                className="group p-2.5 bg-slate-800/60 hover:bg-slate-700/80 border border-slate-600/40 hover:border-slate-500/60 text-slate-400 hover:text-white rounded-lg transition-all duration-200"
-                title="Settings"
-              >
-                <Settings className="w-5 h-5" />
-              </button>
-            </DialogTrigger>
-            <DialogContent className="bg-slate-900 border-slate-800 text-slate-100 sm:max-w-[425px]">
-              <DialogHeader>
-                <DialogTitle>Settings</DialogTitle>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="space-y-4">
-                  <MicrophoneSelector
-                    value={selectedMicrophoneId}
-                    onValueChange={setSelectedMicrophoneId}
-                    disabled={isSessionActive}
-                  />
-                  <VoiceSelector
-                    value={voice}
-                    onValueChange={setVoice}
-                  />
-                  <div className="flex items-center justify-between space-x-2 bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
-                    <Label htmlFor="wake-word" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex flex-col gap-1">
-                      <span>Wake Word</span>
-                      <span className="text-xs font-normal text-slate-400">Listen for &quot;Hi Celestial&quot;</span>
-                    </Label>
-                    <Switch
-                      id="wake-word"
-                      checked={autoWakeWordEnabled}
-                      onCheckedChange={(checked) => {
-                        setAutoWakeWordEnabled(checked);
-                        if (!checked) {
-                          setManualStop(true);
-                        } else {
-                          setManualStop(false);
-                        }
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
+          <Link
+            href="/settings"
+            className="group p-2.5 bg-slate-800/60 hover:bg-slate-700/80 border border-slate-600/40 hover:border-slate-500/60 text-slate-400 hover:text-white rounded-lg transition-all duration-200"
+            title="Settings"
+          >
+            <Settings className="w-5 h-5" />
+          </Link>
 
           {/* Shortcuts Hint */}
           <ShortcutsHint />
