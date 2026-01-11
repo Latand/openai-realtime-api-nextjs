@@ -26,7 +26,14 @@ publish: null
 win:
   target: nsis
 mac:
-  target: dmg
+  target:
+    - dmg
+    - zip
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSMicrophoneUsageDescription: "This app needs access to your microphone for voice transcription and real-time conversation."
+    NSAppleEventsUsageDescription: "This app needs automation access."
 linux:
   target:
     - AppImage
