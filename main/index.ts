@@ -260,6 +260,8 @@ async function createTextImprovementWindow(initialText?: string): Promise<Browse
     alwaysOnTop: true,
     resizable: true,
     skipTaskbar: true,
+    show: false, // Don't show immediately - we'll use showInactive
+    focusable: false, // Prevent focus stealing
     // macOS specific - enable window to be movable by dragging background
     ...(isMac && {
       titleBarStyle: "customButtonsOnHover" as const,
@@ -277,6 +279,12 @@ async function createTextImprovementWindow(initialText?: string): Promise<Browse
   console.log("[TextImprovement] Loading URL:", url);
   await window.loadURL(url);
   console.log("[TextImprovement] URL loaded successfully");
+
+  // Show window without stealing focus from other apps
+  window.showInactive();
+
+  // Re-enable focusable for later interactions
+  window.setFocusable(true);
 
   // Send initial text via IPC after window loads
   if (initialText) {
