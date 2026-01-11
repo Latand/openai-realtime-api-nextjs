@@ -8,7 +8,6 @@ import { useMCPFunctions, useToolsFunctions } from "@/hooks/use-tools";
 import { TranslationsProvider } from "@/components/translations-context";
 import { BroadcastButton } from "@/components/broadcast-button";
 import { MicrophoneSelector } from "@/components/microphone-select";
-import { VoiceSelector } from "@/components/voice-select";
 import { TranscriptWindow } from "@/components/transcript-window";
 import { SummariesWindow } from "@/components/summaries-window";
 import { AudioVisualizer } from "@/components/audio-visualizer";
@@ -26,10 +25,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Settings } from "lucide-react";
+import { Settings, Mic } from "lucide-react";
 import Link from "next/link";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
 
 import { MinimalCostDisplay } from "@/components/minimal-cost-display";
 import {
@@ -214,7 +211,7 @@ function useSoundEffects(isSessionActive: boolean, justReinitialized: boolean) {
 
 function AppContent() {
   // State management
-  const [voice, setVoice] = useState("coral");
+  const [voice] = useState("coral"); // TODO: Add voice selection to settings page
   const [selectedMicrophoneId, setSelectedMicrophoneId] = useState<string>("");
   const [manualStop, setManualStop] = useState(false);
   const [autoWakeWordEnabled, setAutoWakeWordEnabled] = useState(true);
@@ -968,6 +965,30 @@ function AppContent() {
           >
             <Settings className="w-5 h-5" />
           </Link>
+
+          {/* Microphone Selector */}
+          <Dialog>
+            <DialogTrigger asChild>
+              <button
+                className="group p-2.5 bg-slate-800/60 hover:bg-slate-700/80 border border-slate-600/40 hover:border-slate-500/60 text-slate-400 hover:text-white rounded-lg transition-all duration-200"
+                title="Select Microphone"
+              >
+                <Mic className="w-5 h-5" />
+              </button>
+            </DialogTrigger>
+            <DialogContent className="bg-slate-900 border-slate-800 text-slate-100 sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle>Select Microphone</DialogTitle>
+              </DialogHeader>
+              <div className="py-4">
+                <MicrophoneSelector
+                  value={selectedMicrophoneId}
+                  onValueChange={setSelectedMicrophoneId}
+                  disabled={isSessionActive}
+                />
+              </div>
+            </DialogContent>
+          </Dialog>
 
           {/* Shortcuts Hint */}
           <ShortcutsHint />

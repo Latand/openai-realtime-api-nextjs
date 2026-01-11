@@ -49,6 +49,20 @@ async function startNextServer(): Promise<string> {
     appPath = appPath.replace("app.asar", "app.asar.unpacked");
   }
 
+  // Load API keys from userData and set as env vars for Next.js API routes
+  const apiKeysFile = path.join(app.getPath("userData"), "api-keys.json");
+  if (fs.existsSync(apiKeysFile)) {
+    try {
+      const keys = JSON.parse(fs.readFileSync(apiKeysFile, "utf-8"));
+      if (keys.apiKey) process.env.OPENAI_API_KEY = keys.apiKey;
+      if (keys.anthropicKey) process.env.ANTHROPIC_API_KEY = keys.anthropicKey;
+      if (keys.picovoiceKey) process.env.PICOVOICE_ACCESS_KEY = keys.picovoiceKey;
+      console.log("[NextServer] Loaded API keys from userData");
+    } catch (e) {
+      console.error("[NextServer] Failed to load API keys:", e);
+    }
+  }
+
   console.log("[NextServer] Starting Next.js server...");
   console.log("[NextServer] App path:", appPath);
   console.log("[NextServer] Is packaged:", app.isPackaged);
@@ -641,6 +655,82 @@ ipcMain.handle("settings:load", async () => {
   } catch (error) {
     console.error("[Settings] Failed to load:", error);
     return { success: false, error: error instanceof Error ? error.message : String(error), settings: {} };
+  }
+});
+
+// API Keys file (separate from settings for security)
+const API_KEYS_FILE = path.join(app.getPath("userData"), "api-keys.json");
+
+ipcMain.handle("settings:getApiKey", async () => {
+  try {
+    if (!fs.existsSync(API_KEYS_FILE)) {
+      console.log("[Settings] No API keys file found");
+      return { apiKey: "", anthropicKey: "", picovoiceKey: "" };
+    }
+    const data = JSON.parse(fs.readFileSync(API_KEYS_FILE, "utf-8"));
+    console.log("[Settings] Loaded API keys");
+    return {
+      apiKey: data.apiKey || "",
+      anthropicKey: data.anthropicKey || "",
+      picovoiceKey: data.picovoiceKey || "",
+    };
+  } catch (error) {
+    console.error("[Settings] Failed to load API keys:", error);
+    return { apiKey: "", anthropicKey: "", picovoiceKey: "" };
+  }
+});
+
+ipcMain.handle("settings:saveApiKey", async (_, apiKey: string, anthropicKey: string, picovoiceKey: string) => {
+  try {
+    const data = { apiKey, anthropicKey, picovoiceKey };
+    fs.writeFileSync(API_KEYS_FILE, JSON.stringify(data, null, 2), "utf-8");
+    // Also update env vars so Next.js API routes can use them immediately
+    if (apiKey) process.env.OPENAI_API_KEY = apiKey;
+    if (anthropicKey) process.env.ANTHROPIC_API_KEY = anthropicKey;
+    if (picovoiceKey) process.env.PICOVOICE_ACCESS_KEY = picovoiceKey;
+    console.log("[Settings] Saved API keys and updated env vars");
+    return { success: true };
+  } catch (error) {
+    console.error("[Settings] Failed to save API keys:", error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle("settings:getAutoLaunch", async () => {
+  try {
+    if (!fs.existsSync(APP_SETTINGS_FILE)) {
+      return { isEnabled: false };
+    }
+    const settings = JSON.parse(fs.readFileSync(APP_SETTINGS_FILE, "utf-8"));
+    return { isEnabled: settings.autoLaunch ?? false };
+  } catch (error) {
+    console.error("[Settings] Failed to get auto-launch:", error);
+    return { isEnabled: false };
+  }
+});
+
+ipcMain.handle("settings:setAutoLaunch", async (_, enabled: boolean, isHidden: boolean) => {
+  try {
+    // Save to settings file
+    let settings: Record<string, unknown> = {};
+    if (fs.existsSync(APP_SETTINGS_FILE)) {
+      settings = JSON.parse(fs.readFileSync(APP_SETTINGS_FILE, "utf-8"));
+    }
+    settings.autoLaunch = enabled;
+    settings.autoLaunchHidden = isHidden;
+    fs.writeFileSync(APP_SETTINGS_FILE, JSON.stringify(settings, null, 2), "utf-8");
+
+    // Actually set auto-launch using Electron's API
+    app.setLoginItemSettings({
+      openAtLogin: enabled,
+      openAsHidden: isHidden,
+    });
+
+    console.log("[Settings] Auto-launch set to:", enabled);
+    return { success: true };
+  } catch (error) {
+    console.error("[Settings] Failed to set auto-launch:", error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 });
 

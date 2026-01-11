@@ -74,6 +74,12 @@ contextBridge.exposeInMainWorld("electron", {
     save: (settings: Record<string, unknown>) =>
       ipcRenderer.invoke("settings:save", settings),
     load: () => ipcRenderer.invoke("settings:load"),
+    getApiKey: () => ipcRenderer.invoke("settings:getApiKey"),
+    saveApiKey: (apiKey: string, anthropicKey: string, picovoiceKey: string) =>
+      ipcRenderer.invoke("settings:saveApiKey", apiKey, anthropicKey, picovoiceKey),
+    getAutoLaunch: () => ipcRenderer.invoke("settings:getAutoLaunch"),
+    setAutoLaunch: (enabled: boolean, isHidden: boolean) =>
+      ipcRenderer.invoke("settings:setAutoLaunch", enabled, isHidden),
   },
   transcription: {
     openWindow: () => ipcRenderer.invoke("transcription:openWindow"),
