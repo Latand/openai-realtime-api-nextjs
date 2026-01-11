@@ -81,6 +81,13 @@ contextBridge.exposeInMainWorld("electron", {
     setAutoLaunch: (enabled: boolean, isHidden: boolean) =>
       ipcRenderer.invoke("settings:setAutoLaunch", enabled, isHidden),
   },
+  costTracker: {
+    addLog: (log: { model: string; type: string; tokens?: number; seconds?: number; cost: number; metadata?: Record<string, unknown>; timestamp?: string }) =>
+      ipcRenderer.invoke("costTracker:addLog", log),
+    getLogs: (period?: 'day' | 'week' | 'month' | 'all') =>
+      ipcRenderer.invoke("costTracker:getLogs", period),
+    clearLogs: () => ipcRenderer.invoke("costTracker:clearLogs"),
+  },
   transcription: {
     openWindow: () => ipcRenderer.invoke("transcription:openWindow"),
     closeWindow: () => ipcRenderer.invoke("transcription:closeWindow"),

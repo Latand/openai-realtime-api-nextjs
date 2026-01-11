@@ -1,5 +1,6 @@
 /**
- * IndexedDB storage for AI cost tracking
+ * Cost tracking storage - uses Electron file storage in packaged apps,
+ * falls back to IndexedDB in browser/development
  */
 
 const DB_NAME = "ai-cost-tracker";
@@ -17,6 +18,13 @@ export interface CostLog {
   seconds?: number; // For audio/transcription
   cost: number;
   metadata?: Record<string, unknown>;
+}
+
+// Check if running in Electron with cost tracker API available
+function isElectronCostTracker(): boolean {
+  return typeof window !== 'undefined' &&
+         'electron' in window &&
+         typeof window.electron?.costTracker?.addLog === 'function';
 }
 
 // Pricing based on Jan 2026 data
@@ -81,12 +89,34 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 export async function addCostLog(log: Omit<CostLog, "id" | "timestamp"> & { timestamp?: string }): Promise<number> {
+  const entry: CostLog = {
+    ...log,
+    timestamp: log.timestamp || new Date().toISOString(),
+  };
+
+  // Use Electron file storage if available (works reliably in packaged apps)
+  if (isElectronCostTracker()) {
+    try {
+      const result = await window.electron!.costTracker.addLog(log);
+      if (result.success) {
+        // Dispatch custom event for UI updates
+        if (typeof window !== 'undefined') {
+          const event = new CustomEvent('ai-cost-logged', { detail: { cost: entry.cost, model: entry.model } });
+          window.dispatchEvent(event);
+        }
+        return result.id || -1;
+      }
+      console.error("[CostTracker] Electron storage failed:", result.error);
+      return -1;
+    } catch (error) {
+      console.error("[CostTracker] Electron storage error:", error);
+      return -1;
+    }
+  }
+
+  // Fallback to IndexedDB for browser/development
   try {
     const db = await openDB();
-    const entry: CostLog = {
-      ...log,
-      timestamp: log.timestamp || new Date().toISOString(),
-    };
 
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(STORE_NAME, "readwrite");
@@ -116,8 +146,28 @@ export async function addCostLog(log: Omit<CostLog, "id" | "timestamp"> & { time
 export async function getCostStats(
   period: 'day' | 'week' | 'month' | 'all' = 'all'
 ): Promise<{ totalCost: number; byModel: Record<string, number>; logs: CostLog[] }> {
+  // Use Electron file storage if available
+  if (isElectronCostTracker()) {
+    try {
+      const result = await window.electron!.costTracker.getLogs(period);
+      if (result.success) {
+        return {
+          totalCost: result.totalCost,
+          byModel: result.byModel,
+          logs: result.logs as CostLog[]
+        };
+      }
+      console.error("[CostTracker] Electron getLogs failed:", result.error);
+      return { totalCost: 0, byModel: {}, logs: [] };
+    } catch (error) {
+      console.error("[CostTracker] Electron getLogs error:", error);
+      return { totalCost: 0, byModel: {}, logs: [] };
+    }
+  }
+
+  // Fallback to IndexedDB
   const db = await openDB();
-  
+
   let range: IDBKeyRange | null = null;
   if (period !== 'all') {
     const now = new Date();
@@ -143,7 +193,7 @@ export async function getCostStats(
         acc.byModel[log.model] = (acc.byModel[log.model] || 0) + log.cost;
         return acc;
       }, { totalCost: 0, byModel: {} as Record<string, number>, logs });
-      
+
       resolve(stats);
     };
 
@@ -154,6 +204,26 @@ export async function getCostStats(
 }
 
 export async function clearCostLogs(): Promise<void> {
+  // Use Electron file storage if available
+  if (isElectronCostTracker()) {
+    try {
+      const result = await window.electron!.costTracker.clearLogs();
+      if (result.success) {
+        // Dispatch custom event for reset
+        if (typeof window !== 'undefined') {
+          const event = new CustomEvent('ai-cost-cleared');
+          window.dispatchEvent(event);
+        }
+        return;
+      }
+      console.error("[CostTracker] Electron clearLogs failed:", result.error);
+    } catch (error) {
+      console.error("[CostTracker] Electron clearLogs error:", error);
+    }
+    return;
+  }
+
+  // Fallback to IndexedDB
   try {
     const db = await openDB();
     return new Promise((resolve, reject) => {

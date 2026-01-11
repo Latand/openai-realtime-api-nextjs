@@ -559,6 +559,7 @@ const PERSISTENT_NOTES_FILE = path.join(app.getPath("userData"), "persistent-not
 const TEXT_IMPROVEMENT_SETTINGS_FILE = path.join(app.getPath("userData"), "text-improvement-settings.json");
 const SYSTEM_PROMPT_FILE = path.join(app.getPath("userData"), "system-prompt.txt");
 const APP_SETTINGS_FILE = path.join(app.getPath("userData"), "app-settings.json");
+const COST_LOGS_FILE = path.join(app.getPath("userData"), "cost-logs.json");
 
 ipcMain.handle("memory:saveCompacts", async (_, compacts: unknown[]) => {
   try {
@@ -745,6 +746,87 @@ ipcMain.handle("settings:setAutoLaunch", async (_, enabled: boolean, isHidden: b
     return { success: true };
   } catch (error) {
     console.error("[Settings] Failed to set auto-launch:", error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+// Cost tracker file storage (replaces IndexedDB which doesn't work reliably in packaged apps)
+interface CostLog {
+  id?: number;
+  timestamp: string;
+  model: string;
+  type: string;
+  tokens?: number;
+  seconds?: number;
+  cost: number;
+  metadata?: Record<string, unknown>;
+}
+
+ipcMain.handle("costTracker:addLog", async (_, log: Omit<CostLog, "id" | "timestamp"> & { timestamp?: string }) => {
+  try {
+    let logs: CostLog[] = [];
+    if (fs.existsSync(COST_LOGS_FILE)) {
+      logs = JSON.parse(fs.readFileSync(COST_LOGS_FILE, "utf-8"));
+    }
+
+    const entry: CostLog = {
+      ...log,
+      id: logs.length > 0 ? Math.max(...logs.map(l => l.id || 0)) + 1 : 1,
+      timestamp: log.timestamp || new Date().toISOString(),
+    };
+
+    logs.push(entry);
+    fs.writeFileSync(COST_LOGS_FILE, JSON.stringify(logs, null, 2), "utf-8");
+    console.log("[CostTracker] Added log:", entry.model, entry.cost);
+    return { success: true, id: entry.id };
+  } catch (error) {
+    console.error("[CostTracker] Failed to add log:", error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle("costTracker:getLogs", async (_, period?: 'day' | 'week' | 'month' | 'all') => {
+  try {
+    if (!fs.existsSync(COST_LOGS_FILE)) {
+      return { success: true, logs: [], totalCost: 0, byModel: {} };
+    }
+
+    let logs: CostLog[] = JSON.parse(fs.readFileSync(COST_LOGS_FILE, "utf-8"));
+
+    // Filter by period if specified
+    if (period && period !== 'all') {
+      const now = new Date();
+      const startDate = new Date();
+
+      if (period === 'day') startDate.setDate(now.getDate() - 1);
+      if (period === 'week') startDate.setDate(now.getDate() - 7);
+      if (period === 'month') startDate.setMonth(now.getMonth() - 1);
+
+      logs = logs.filter(log => new Date(log.timestamp) >= startDate);
+    }
+
+    // Calculate stats
+    const stats = logs.reduce((acc, log) => {
+      acc.totalCost += log.cost;
+      acc.byModel[log.model] = (acc.byModel[log.model] || 0) + log.cost;
+      return acc;
+    }, { totalCost: 0, byModel: {} as Record<string, number> });
+
+    console.log("[CostTracker] Loaded logs:", logs.length, "total:", stats.totalCost);
+    return { success: true, logs, ...stats };
+  } catch (error) {
+    console.error("[CostTracker] Failed to load logs:", error);
+    return { success: false, error: error instanceof Error ? error.message : String(error), logs: [], totalCost: 0, byModel: {} };
+  }
+});
+
+ipcMain.handle("costTracker:clearLogs", async () => {
+  try {
+    fs.writeFileSync(COST_LOGS_FILE, "[]", "utf-8");
+    console.log("[CostTracker] Cleared all logs");
+    return { success: true };
+  } catch (error) {
+    console.error("[CostTracker] Failed to clear logs:", error);
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 });

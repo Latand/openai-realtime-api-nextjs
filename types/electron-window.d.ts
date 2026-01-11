@@ -116,6 +116,34 @@ declare global {
           isHidden: boolean
         ) => Promise<{ success: boolean; error?: string }>;
       };
+      costTracker: {
+        addLog: (log: {
+          model: string;
+          type: string;
+          tokens?: number;
+          seconds?: number;
+          cost: number;
+          metadata?: Record<string, unknown>;
+          timestamp?: string;
+        }) => Promise<{ success: boolean; id?: number; error?: string }>;
+        getLogs: (period?: 'day' | 'week' | 'month' | 'all') => Promise<{
+          success: boolean;
+          logs: Array<{
+            id?: number;
+            timestamp: string;
+            model: string;
+            type: string;
+            tokens?: number;
+            seconds?: number;
+            cost: number;
+            metadata?: Record<string, unknown>;
+          }>;
+          totalCost: number;
+          byModel: Record<string, number>;
+          error?: string;
+        }>;
+        clearLogs: () => Promise<{ success: boolean; error?: string }>;
+      };
       transcription: {
         openWindow: () => Promise<{ success: boolean; alreadyOpen?: boolean; error?: string }>;
         closeWindow: () => Promise<{ success: boolean }>;
