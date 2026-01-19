@@ -1,20 +1,62 @@
-# OpenAI WebRTC Shadcn Next15 Starter
-This is a WebRTC-based Voice AI stream application using `OpenAI`'s `Realtime API` and `WebRTC`. Project contains `/api` route and UI components developed with `Next.js` and `shadcn/ui`. It supports real-time audio conversations implented in [skrivov/openai-voice-webrtc-next](https://github.com/skrivov/openai-voice-webrtc-next) with the addition of a hook to abstract the WebRTC handling.
+# OpenAI Realtime Voice Assistant
 
-https://github.com/user-attachments/assets/ea9324af-5c18-48d2-b980-2b81baeea4c0
+A cross-platform voice assistant application using OpenAI's Realtime API with WebRTC. Built with Next.js 15 and Electron, featuring real-time voice conversations, wake word detection, multiple transcription modes, and extensible tool integrations.
 
 ## Features
-- **Next.js Framework**: Built with Next.js for server-side rendering and API routes.
-- **Modern UI**: Animated using Tailwind CSS & Framer Motion & shadcn/ui.
-- **Use-WebRTC Hook**: A hook to abstract the OpenAI WebRTC handling.
-- **Tool Calling**: 6 example functions to demonstrate client side tools along with Realtime API: `getCurrentTime`, `partyMode`, `changeBackground`, `launchWebsite`, `copyToClipboard`, `scrapeWebsite` (requires FireCrawl API key)
-- **Localization**: Select language for app strings and the voice agent (English, Spanish, French, Chinese)
-- **Type Safety**: TypeScript with strict eslint rules (optional)
 
-  
+### Voice Conversation
+- **Real-time Voice Chat**: Two-way voice conversations using OpenAI's Realtime API via WebRTC
+- **Multiple Voice Options**: Select from available OpenAI voices (default: Coral)
+- **Audio Visualization**: Live waveform display for both user and assistant audio
+- **Session Timer**: Track conversation duration
+- **Microphone Controls**: Mute/unmute during active sessions
+
+### Wake Word Detection
+- **Hands-free Activation**: Say "Hi Celestial" to start a voice session
+- **Picovoice Porcupine**: Offline wake word detection using Picovoice engine
+- **Configurable Sensitivity**: Adjustable detection threshold
+
+### Transcription Modes
+- **Real-time Transcription (Ctrl+Shift+T)**: Live speech-to-text using OpenAI's real-time transcription with local VAD
+- **Whisper Transcription (Ctrl+Shift+R)**: Higher quality transcription - records audio then transcribes via Whisper API
+- **Text Improvement (Ctrl+Shift+G)**: Capture speech and improve/reformat text using AI
+- **Floating Overlay Windows**: Transcription appears in draggable, always-on-top windows
+
+### Tool System
+The assistant can execute various tools during conversation:
+- `getCurrentTime` - Get current time and timezone
+- `launchWebsite` - Open URLs in browser
+- `pasteText` - Paste text at cursor position
+- `copyToClipboard` / `readClipboard` - Clipboard operations
+- `scrapeWebsite` - Extract content from web pages (requires FireCrawl API)
+- `adjustSystemVolume` - Control system volume (Linux)
+- `askClaude` / `getClaudeOutput` - Delegate complex queries to Claude CLI
+- `saveConversationSummary` / `stopSession` - Session management
+
+### Conversation Memory
+- **Conversation Compacts**: Automatic summarization of past conversations
+- **Persistent Notes**: Long-term facts about the user
+- **Custom System Prompts**: Customize assistant behavior
+- **Memory Injection**: Previous context injected into new sessions
+
+### MCP Integration
+- Dynamic tool loading from Model Context Protocol servers
+- Spotify control via MCP (when configured)
+
+### Desktop Features (Electron)
+- **System Tray**: Minimize to tray, quick access menu
+- **Global Shortcuts**: Work even when app is not focused
+- **Always-on-Top**: Optional floating window mode
+- **Auto-launch**: Start with system
+- **Cost Tracking**: Monitor API usage costs
+
 ## Requirements
-- **Deno runtime** or **Node.js**
-- OpenAI API Key or Azure OpenAI API Key in `.env` file
+
+- Node.js 18+
+- OpenAI API Key (with Realtime API access)
+- Optional: Anthropic API Key (for askClaude tool)
+- Optional: Picovoice Access Key (for wake word detection)
+- Optional: FireCrawl API Key (for website scraping)
 
 ## Installation
 
@@ -24,60 +66,141 @@ git clone https://github.com/cameronking4/openai-realtime-api-nextjs.git
 cd openai-realtime-api-nextjs
 ```
 
-### 2. Environment Setup
-Create a `.env` file in the root directory:
-```env
-OPENAI_API_KEY=your-openai-api-key
-FIRECRAWL_API_KEY=your-firecrawl-api-key
-# Optional: require a shared secret for /api/session and /api/scrape
-SESSION_SECRET=your-session-secret
-NEXT_PUBLIC_SESSION_SECRET=your-session-secret
-NEXT_PUBLIC_PICOVOICE_ACCESS_KEY=your-picovoice-access-key
-MCP_SPOTIFY_DIR=/absolute/path/to/spotify-mcp
-MCP_SPOTIFY_COMMAND=uv
-MCP_SPOTIFY_ENTRY=spotify-mcp
-```
-
-### 3. Install Dependencies
-If using **Node.js**:
+### 2. Install Dependencies
 ```bash
 npm install
 ```
 
-If using **Deno**:
-```bash
-deno install
+### 3. Environment Setup
+Create a `.env.local` file in the root directory:
+```env
+OPENAI_API_KEY=your-openai-api-key
+ANTHROPIC_API_KEY=your-anthropic-api-key       # Optional: for askClaude tool
+PICOVOICE_ACCESS_KEY=your-picovoice-access-key # Optional: for wake word
+FIRECRAWL_API_KEY=your-firecrawl-api-key       # Optional: for web scraping
+
+# Optional: session security
+SESSION_SECRET=your-session-secret
+NEXT_PUBLIC_SESSION_SECRET=your-session-secret
 ```
 
-### 4. Run the Application
+For Electron builds, API keys can also be configured in the Settings page and are stored securely in the user data directory.
 
-#### Using Node.js:
+## Development
+
+### Web Development (Next.js only)
 ```bash
 npm run dev
 ```
+Opens at `http://localhost:3000` with Turbopack hot reload.
 
-#### Using Deno:
+### Electron Development
 ```bash
-deno task start
+npm run electron-dev
+```
+Runs Next.js dev server and Electron concurrently.
+
+## Building for Production
+
+### Build Next.js Web App
+```bash
+npm run build
 ```
 
-The application will be available at `http://localhost:3000`.
+### Build Electron Desktop App
+```bash
+# Clean build (recommended)
+rm -rf .next && npm run build
 
-## Usage
-1. Open the app in your browser: `http://localhost:3000`.
-3. Select a voice and start the audio session.
+# Full Electron package
+npm run electron-build
+```
 
-## Deploy to Vercel
-**Deploy in one-click**
+### Cross-Platform Builds
+```bash
+# Linux AppImage
+npx electron-builder --linux AppImage
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fcameronking4%2Fopenai-realtime-api-nextjs&env=OPENAI_API_KEY&envDescription=OpenAI%20Key%20(Realtime%20API%20Beta%20access)&envLink=https%3A%2F%2Fplatform.openai.com%2Fapi-keys&project-name=openai-rt-shadcn&repository-name=openai-realtime-api-nextjs-clone&demo-title=OpenAI%20Realtime%20API%20(WebRTC)%20x%20shadcn%2Fui&demo-description=Next.js%2015%20template%20to%20create%20beautiful%20Voice%20AI%20applications%20with%20OpenAI%20Realtime%20API%20Beta&demo-url=https%3A%2F%2Fopenai-rt-shadcn.vercel.app&demo-image=http%3A%2F%2Fopenai-rt-shadcn.vercel.app%2Fdemo.gif)
+# Windows (creates portable zip)
+npx electron-builder --win zip
+
+# macOS Intel
+npx electron-builder --mac zip --x64
+
+# macOS Apple Silicon
+npx electron-builder --mac zip --arm64
+```
+
+Output files are created in the `dist/` directory.
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+Shift+T | Toggle real-time transcription |
+| Ctrl+Shift+R | Toggle Whisper transcription |
+| Ctrl+Shift+M | Mute/unmute microphone |
+| Ctrl+Shift+G | Open text improvement window |
+
+## Project Structure
+
+```
+app/
+  (main)/          # Primary voice chat interface
+  (overlay)/       # Overlay windows (transcription, text improvement)
+  api/             # API routes (session, scrape, compact, etc.)
+components/        # React UI components
+hooks/
+  use-webrtc.ts    # Core WebRTC connection and audio streaming
+  use-wake-word.ts # Picovoice wake word detection
+  use-tools.ts     # Tool function implementations
+  use-transcription.ts # Whisper transcription hook
+lib/
+  tools.ts         # Tool definitions for the Realtime API
+  conversation-memory.ts # Memory and context persistence
+  mcp-client.ts    # MCP integration
+main/              # Electron main process
+  index.ts         # Main entry, window management, IPC handlers
+  preload.ts       # Context bridge for renderer
+  tray.ts          # System tray
+  mcp-service.ts   # MCP server communication
+```
+
+## Configuration
+
+### MCP Servers
+Configure MCP servers via environment variables:
+```env
+MCP_SPOTIFY_DIR=/path/to/spotify-mcp
+MCP_SPOTIFY_COMMAND=uv
+MCP_SPOTIFY_ENTRY=spotify-mcp
+```
+
+### Wake Word
+The default wake word is "Hi Celestial". Custom wake words require generating a `.ppn` file via Picovoice Console and placing it in `public/models/`.
+
+## Platform Notes
+
+- **Linux**: Full support including system volume control (requires `wpctl`) and keyboard simulation (requires `xdotool`)
+- **macOS**: Requires microphone permissions; code signing needed for distribution
+- **Windows**: Full support; some features may require running as administrator
+
+## Tech Stack
+
+- **Framework**: Next.js 15 with App Router
+- **Desktop**: Electron 34
+- **UI**: Tailwind CSS, shadcn/ui, Framer Motion
+- **Audio**: WebRTC, Web Audio API
+- **Wake Word**: Picovoice Porcupine
+- **AI**: OpenAI Realtime API, Anthropic Claude
 
 ## License
+
 This project is licensed under the MIT License. See the `LICENSE` file for details.
 
 ## Acknowledgements
-- [OpenAI](https://openai.com/) for their API and models.
-- [Next.js](https://nextjs.org/) for the framework.
-- [Tailwind CSS](https://tailwindcss.com/) for styling.
-- [Simon Willison’s Weblog](https://simonwillison.net/2024/Dec/17/openai-webrtc/) for inspiration
-- [Originator: skrivov](https://github.com/skrivov/openai-voice-webrtc-next) for the WebRTC and Nextjs implementation
+
+- [OpenAI](https://openai.com/) for the Realtime API
+- [Picovoice](https://picovoice.ai/) for wake word detection
+- [skrivov/openai-voice-webrtc-next](https://github.com/skrivov/openai-voice-webrtc-next) for the original WebRTC implementation
+- [Next.js](https://nextjs.org/) and [Electron](https://www.electronjs.org/) for the framework
