@@ -383,6 +383,18 @@ app.on("ready", async () => {
     return { success: true };
   });
 
+  ipcMain.handle("transcription:cancelWhisper", () => {
+    // Notify main window to cancel Whisper recording (stop without transcribing)
+    mainWindow?.webContents.send("transcription:cancelWhisper");
+    return { success: true };
+  });
+
+  ipcMain.handle("transcription:retryLast", () => {
+    // Notify main window to retry the last Whisper recording
+    mainWindow?.webContents.send("transcription:retryLast");
+    return { success: true };
+  });
+
   ipcMain.handle("transcription:startDrag", () => {
     console.log("[Drag] startDrag called, window exists:", !!transcriptionWindow);
     if (transcriptionWindow) {

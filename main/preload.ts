@@ -92,7 +92,9 @@ contextBridge.exposeInMainWorld("electron", {
     openWindow: () => ipcRenderer.invoke("transcription:openWindow"),
     closeWindow: () => ipcRenderer.invoke("transcription:closeWindow"),
     stop: () => ipcRenderer.invoke("transcription:stop"),
+    cancelWhisper: () => ipcRenderer.invoke("transcription:cancelWhisper"),
     clear: () => ipcRenderer.invoke("transcription:clear"),
+    retryLast: () => ipcRenderer.invoke("transcription:retryLast"),
     updateText: (text: string, interim: string) =>
       ipcRenderer.invoke("transcription:updateText", text, interim),
     updateState: (state: { isListening?: boolean; isRecording: boolean; isProcessing: boolean; recordingDuration: number }) =>
@@ -120,10 +122,20 @@ contextBridge.exposeInMainWorld("electron", {
       ipcRenderer.on("transcription:stop", handler);
       return () => ipcRenderer.removeListener("transcription:stop", handler);
     },
+    onCancelWhisper: (callback: () => void) => {
+      const handler = () => callback();
+      ipcRenderer.on("transcription:cancelWhisper", handler);
+      return () => ipcRenderer.removeListener("transcription:cancelWhisper", handler);
+    },
     onClear: (callback: () => void) => {
       const handler = () => callback();
       ipcRenderer.on("transcription:clear", handler);
       return () => ipcRenderer.removeListener("transcription:clear", handler);
+    },
+    onRetryLast: (callback: () => void) => {
+      const handler = () => callback();
+      ipcRenderer.on("transcription:retryLast", handler);
+      return () => ipcRenderer.removeListener("transcription:retryLast", handler);
     },
   },
   textImprovement: {

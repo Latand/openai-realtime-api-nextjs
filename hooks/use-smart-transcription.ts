@@ -34,12 +34,14 @@ export function useSmartTranscription({
   silenceThreshold = 0.02,
   deviceId,
   onTranscriptionComplete,
+  playSounds = false,
 }: UseSmartTranscriptionOptions = {}): UseSmartTranscriptionReturn {
   const [status, setStatus] = useState<SmartTranscriptionStatus>("idle");
   const [transcription, setTranscription] = useState("");
   const [chunks, setChunks] = useState<TranscriptionChunk[]>([]);
   const [currentRMS, setCurrentRMS] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [recordingDurationSeconds, setRecordingDurationSeconds] = useState(0);
 
   const vadProcessorRef = useRef<VADProcessor | null>(null);
   const chunkManagerRef = useRef<AudioChunkManager | null>(null);
@@ -48,6 +50,8 @@ export function useSmartTranscription({
   const transcriptionRef = useRef(transcription);
   const toggleInFlightRef = useRef(false);
   const onTranscriptionCompleteRef = useRef(onTranscriptionComplete);
+  const recordingStartTimeRef = useRef<number | null>(null);
+  const durationIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
     transcriptionRef.current = transcription;
@@ -61,6 +65,27 @@ export function useSmartTranscription({
   useEffect(() => {
     statusRef.current = status;
   }, [status]);
+
+  const clearDurationInterval = useCallback(() => {
+    if (durationIntervalRef.current !== null) {
+      window.clearInterval(durationIntervalRef.current);
+      durationIntervalRef.current = null;
+    }
+  }, []);
+
+  const startDurationTimer = useCallback(() => {
+    clearDurationInterval();
+    durationIntervalRef.current = window.setInterval(() => {
+      if (recordingStartTimeRef.current === null) return;
+      const sec = (Date.now() - recordingStartTimeRef.current) / 1000;
+      setRecordingDurationSeconds(sec);
+    }, 250);
+  }, [clearDurationInterval]);
+
+  const stopDurationTimer = useCallback(() => {
+    clearDurationInterval();
+    recordingStartTimeRef.current = null;
+  }, [clearDurationInterval]);
 
   // Build prompt for Whisper with previous context + style hints
   const buildTranscriptionPrompt = useCallback(() => {
@@ -85,7 +110,9 @@ export function useSmartTranscription({
   const transcribeBlob = useCallback(
     async (audioBlob: Blob, durationMs: number): Promise<string | null> => {
       try {
-        playSound("/sounds/transcription-processing.mp3");
+        if (playSounds) {
+          playSound("/sounds/transcription-processing.mp3");
+        }
 
         const formData = new FormData();
         formData.append("audio", audioBlob, "recording.webm");
@@ -143,7 +170,9 @@ export function useSmartTranscription({
             metadata: { duration: durationSec },
           }).catch((e) => console.error("Failed to log cost:", e));
 
-          playSound("/sounds/transcription-finished.mp3");
+          if (playSounds) {
+            playSound("/sounds/transcription-finished.mp3");
+          }
 
           // Show cost notification
           const costDisplay = cost < 0.01
@@ -189,9 +218,11 @@ export function useSmartTranscription({
           }
           return prev;
         });
+        // When we leave processing, clear any stale duration display.
+        setRecordingDurationSeconds(0);
       }
     },
-    [buildTranscriptionPrompt]
+    [buildTranscriptionPrompt, playSounds]
   );
 
   const start = useCallback(async () => {
@@ -232,12 +263,22 @@ export function useSmartTranscription({
 
       vadProcessor.onSpeechStart = () => {
         console.log("[Hook] Speech started");
+        recordingStartTimeRef.current = Date.now();
+        setRecordingDurationSeconds(0);
+        startDurationTimer();
         setStatus("recording");
         // chunkManager is already recording continuously
       };
 
       vadProcessor.onSpeechEnd = async () => {
         console.log("[Hook] Speech ended, processing...");
+        // Freeze duration for this segment (used for UI/progress estimation).
+        const startedAt = recordingStartTimeRef.current;
+        stopDurationTimer();
+        const durationMs = startedAt ? Date.now() - startedAt : 0;
+        if (durationMs > 0) {
+          setRecordingDurationSeconds(durationMs / 1000);
+        }
         setStatus("processing");
 
         const audioBlob = await chunkManager.getAccumulatedAudio();
@@ -246,15 +287,14 @@ export function useSmartTranscription({
             console.warn("[Hook] Audio blob too small, skipping transcription");
             setStatus("listening");
             chunkManager.clear();
+            setRecordingDurationSeconds(0);
             return;
         }
-
-        const duration = 2000; // Estimated or placeholder
 
         chunkManager.clear();
         
         // Process in background
-        transcribeBlob(audioBlob, duration);
+        transcribeBlob(audioBlob, durationMs);
       };
 
       vadProcessor.connect(stream);
@@ -265,7 +305,9 @@ export function useSmartTranscription({
       chunkManagerRef.current = chunkManager;
 
       setStatus("listening");
-      playSound("/sounds/session-start.mp3");
+      if (playSounds) {
+        playSound("/sounds/session-start.mp3");
+      }
       setError(null);
     } catch (err) {
       console.error("Failed to start smart transcription:", err);
@@ -273,7 +315,7 @@ export function useSmartTranscription({
     } finally {
       toggleInFlightRef.current = false;
     }
-  }, [deviceId, pauseDuration, speechThreshold, silenceThreshold, transcribeBlob]);
+  }, [deviceId, pauseDuration, speechThreshold, silenceThreshold, startDurationTimer, stopDurationTimer, transcribeBlob, playSounds]);
 
   const stop = useCallback(async (): Promise<string> => {
     if (statusRef.current === "idle" || toggleInFlightRef.current) return transcriptionRef.current;
@@ -281,6 +323,8 @@ export function useSmartTranscription({
     try {
       vadProcessorRef.current?.stop();
       vadProcessorRef.current?.disconnect();
+      stopDurationTimer();
+      setRecordingDurationSeconds(0);
       
       let finalChunkText: string | null = null;
 
@@ -307,7 +351,9 @@ export function useSmartTranscription({
 
       setStatus("idle");
       setCurrentRMS(0);
-      playSound("/sounds/session-end.mp3");
+      if (playSounds) {
+        playSound("/sounds/session-end.mp3");
+      }
 
       let finalText = transcriptionRef.current;
       if (finalChunkText) {
@@ -317,7 +363,7 @@ export function useSmartTranscription({
     } finally {
       toggleInFlightRef.current = false;
     }
-  }, [transcribeBlob]);
+  }, [transcribeBlob, stopDurationTimer, playSounds]);
 
   const toggle = useCallback(async () => {
     if (statusRef.current === "idle") {
@@ -349,6 +395,7 @@ export function useSmartTranscription({
       chunks,
       currentRMS,
       error,
+      recordingDurationSeconds,
     },
     isActive: status !== "idle",
     toggle,

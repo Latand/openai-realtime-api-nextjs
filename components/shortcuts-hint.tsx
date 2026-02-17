@@ -23,11 +23,11 @@ export function ShortcutsHint() {
           <h4 className="text-sm font-medium text-slate-200">Keyboard Shortcuts</h4>
           <div className="space-y-2">
             <div className="flex justify-between text-xs">
-              <span className="text-slate-400">Live Transcription</span>
+              <span className="text-slate-400">Smart Transcription</span>
               <span className="font-mono text-slate-300 bg-slate-800 px-1.5 py-0.5 rounded">Ctrl+Shift+T</span>
             </div>
             <div className="flex justify-between text-xs">
-              <span className="text-slate-400">Whisper Mode</span>
+              <span className="text-slate-400">HQ Transcription</span>
               <span className="font-mono text-slate-300 bg-slate-800 px-1.5 py-0.5 rounded">Ctrl+Shift+R</span>
             </div>
             <div className="flex justify-between text-xs">

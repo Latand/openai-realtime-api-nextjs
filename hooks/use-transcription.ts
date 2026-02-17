@@ -12,6 +12,8 @@ import {
   updatePendingTranscription,
   getPendingCount,
   type PendingTranscription,
+  saveRecentRecording,
+  getLatestRecentRecording,
 } from "@/lib/transcription-storage";
 
 export interface TranscriptionResult {
@@ -28,7 +30,9 @@ interface UseTranscriptionReturn {
   recordingDuration: number; // Duration in seconds
   startRecording: () => Promise<void>;
   stopRecording: () => Promise<TranscriptionResult | null>;
+  cancelRecording: () => Promise<void>;
   toggleRecording: () => Promise<TranscriptionResult | null>;
+  retryLast: () => Promise<TranscriptionResult | null>;
   retryPending: (id: string) => Promise<TranscriptionResult | null>;
   retryAllPending: () => Promise<TranscriptionResult[]>;
   getPendingTranscriptions: () => Promise<PendingTranscription[]>;
@@ -51,6 +55,8 @@ export default function useTranscription(
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const recordingStartTimeRef = useRef<number>(0);
+  const stopInFlightRef = useRef(false);
+  const durationIntervalRef = useRef<number | null>(null);
 
   // Sync state with overlay window
   useEffect(() => {
@@ -65,6 +71,29 @@ export default function useTranscription(
   useEffect(() => {
     getPendingCount().then(setPendingCount).catch(console.error);
   }, []);
+
+  const clearDurationInterval = useCallback(() => {
+    if (durationIntervalRef.current !== null) {
+      window.clearInterval(durationIntervalRef.current);
+      durationIntervalRef.current = null;
+    }
+  }, []);
+
+  // Live duration updates while recording (so overlay shows elapsed time).
+  useEffect(() => {
+    if (!isRecording) {
+      clearDurationInterval();
+      return;
+    }
+
+    clearDurationInterval();
+    durationIntervalRef.current = window.setInterval(() => {
+      const duration = (Date.now() - recordingStartTimeRef.current) / 1000;
+      setRecordingDuration(duration);
+    }, 250);
+
+    return () => clearDurationInterval();
+  }, [isRecording, clearDurationInterval]);
 
   const refreshPendingCount = useCallback(async () => {
     try {
@@ -191,15 +220,21 @@ export default function useTranscription(
     }
   }, [selectedMicrophoneId]);
 
-  const stopRecording = useCallback(async (): Promise<TranscriptionResult | null> => {
-    if (!mediaRecorderRef.current || !isRecording) {
+  const stopAndCollectAudio = useCallback(async (): Promise<{ audioBlob: Blob; duration: number } | null> => {
+    const mediaRecorder = mediaRecorderRef.current;
+    if (!mediaRecorder || mediaRecorder.state === "inactive") {
       return null;
     }
+    if (stopInFlightRef.current) {
+      return null;
+    }
+    stopInFlightRef.current = true;
+
+    // Stop live duration timer immediately (we'll compute final duration on stop).
+    clearDurationInterval();
 
     return new Promise((resolve) => {
-      const mediaRecorder = mediaRecorderRef.current!;
-
-      mediaRecorder.onstop = async () => {
+      mediaRecorder.onstop = () => {
         // Calculate recording duration
         const duration = (Date.now() - recordingStartTimeRef.current) / 1000;
         setRecordingDuration(duration);
@@ -217,68 +252,104 @@ export default function useTranscription(
         }
         setAnalyser(null);
 
-        // Play sound to indicate recording stopped, now processing
-        playSound("/sounds/transcription-processing.mp3");
-
-        setIsRecording(false);
-        setIsProcessing(true);
-
         const audioBlob = new Blob(audioChunksRef.current, {
           type: "audio/webm;codecs=opus",
         });
 
-        try {
-          const { result, error: transcriptionError, retryable } = await transcribeBlob(audioBlob);
-
-          if (result) {
-            // Log cost
-            const minutes = duration / 60;
-            const cost = minutes * PRICING['whisper-1'].per_minute;
-            addCostLog({
-                model: 'whisper-1',
-                type: 'transcription',
-                seconds: duration,
-                cost,
-                metadata: { duration }
-            }).catch(e => console.error("Failed to log cost:", e));
-
-            playSound("/sounds/transcription-finished.mp3");
-            setIsProcessing(false);
-            resolve(result);
-          } else {
-            // Transcription failed
-            if (retryable) {
-              // Save for retry
-              const savedId = await savePendingTranscription(audioBlob, transcriptionError);
-              console.log("[Transcription] Saved for retry:", savedId);
-              await refreshPendingCount();
-              playSound("/sounds/session-end.mp3");
-              setError(`Transcription failed, saved for retry: ${transcriptionError}`);
-            } else {
-              setError(`Transcription failed: ${transcriptionError}`);
-            }
-            setIsProcessing(false);
-            resolve(null);
-          }
-        } catch (err) {
-          console.error("Error transcribing:", err);
-          // Save for retry on unexpected errors
-          try {
-            const savedId = await savePendingTranscription(audioBlob, String(err));
-            console.log("[Transcription] Saved for retry after error:", savedId);
-            await refreshPendingCount();
-          } catch (saveErr) {
-            console.error("[Transcription] Failed to save for retry:", saveErr);
-          }
-          setError(`Transcription failed: ${err}`);
-          setIsProcessing(false);
-          resolve(null);
-        }
+        mediaRecorderRef.current = null;
+        stopInFlightRef.current = false;
+        resolve({ audioBlob, duration });
       };
 
       mediaRecorder.stop();
     });
-  }, [isRecording, transcribeBlob, refreshPendingCount]);
+  }, [clearDurationInterval]);
+
+  const stopRecording = useCallback(async (): Promise<TranscriptionResult | null> => {
+    setError(null);
+
+    // Transition UI immediately: stop recording, start processing.
+    setIsRecording(false);
+    setIsProcessing(true);
+
+    // Play sound to indicate recording stopped, now processing
+    playSound("/sounds/transcription-processing.mp3");
+
+    const collected = await stopAndCollectAudio();
+    if (!collected) {
+      setIsProcessing(false);
+      return null;
+    }
+
+    const { audioBlob, duration } = collected;
+
+    // Always keep the last Whisper recording around for "Retry last" (even on success).
+    saveRecentRecording(audioBlob, { kind: "whisper", durationSeconds: duration }).catch((err) => {
+      console.warn("[Transcription] Failed to save recent recording:", err);
+    });
+
+    try {
+      const { result, error: transcriptionError, retryable } = await transcribeBlob(audioBlob);
+
+      if (result) {
+        // Log cost
+        const minutes = duration / 60;
+        const cost = minutes * PRICING['whisper-1'].per_minute;
+        addCostLog({
+            model: 'whisper-1',
+            type: 'transcription',
+            seconds: duration,
+            cost,
+            metadata: { duration }
+        }).catch(e => console.error("Failed to log cost:", e));
+
+        playSound("/sounds/transcription-finished.mp3");
+        setIsProcessing(false);
+        return result;
+      }
+
+      // Transcription failed
+      if (retryable) {
+        // Save for retry
+        const savedId = await savePendingTranscription(audioBlob, transcriptionError);
+        console.log("[Transcription] Saved for retry:", savedId);
+        await refreshPendingCount();
+        playSound("/sounds/session-end.mp3");
+        setError(`Transcription failed, saved for retry: ${transcriptionError}`);
+      } else {
+        setError(`Transcription failed: ${transcriptionError}`);
+      }
+      setIsProcessing(false);
+      return null;
+    } catch (err) {
+      console.error("Error transcribing:", err);
+      // Save for retry on unexpected errors
+      try {
+        const savedId = await savePendingTranscription(audioBlob, String(err));
+        console.log("[Transcription] Saved for retry after error:", savedId);
+        await refreshPendingCount();
+      } catch (saveErr) {
+        console.error("[Transcription] Failed to save for retry:", saveErr);
+      }
+      setError(`Transcription failed: ${err}`);
+      setIsProcessing(false);
+      return null;
+    }
+  }, [refreshPendingCount, stopAndCollectAudio, transcribeBlob]);
+
+  const cancelRecording = useCallback(async (): Promise<void> => {
+    setError(null);
+
+    // Stop recording UI immediately and do NOT enter processing.
+    setIsRecording(false);
+    setIsProcessing(false);
+
+    const collected = await stopAndCollectAudio();
+    if (!collected) return;
+
+    // Intentionally do not transcribe and do not save into "recent" cache.
+    playSound("/sounds/session-end.mp3");
+  }, [stopAndCollectAudio]);
 
   const toggleRecording = useCallback(async (): Promise<TranscriptionResult | null> => {
     if (isRecording) {
@@ -288,6 +359,44 @@ export default function useTranscription(
       return null;
     }
   }, [isRecording, startRecording, stopRecording]);
+
+  // Retry the most recent Whisper recording (even if the last attempt succeeded but quality was bad).
+  const retryLast = useCallback(async (): Promise<TranscriptionResult | null> => {
+    setIsProcessing(true);
+    setError(null);
+
+    try {
+      const recent = await getLatestRecentRecording("whisper");
+      if (!recent) {
+        setError("No recent recording to retry");
+        setIsProcessing(false);
+        return null;
+      }
+
+      if (typeof recent.durationSeconds === "number") {
+        setRecordingDuration(recent.durationSeconds);
+      }
+
+      playSound("/sounds/transcription-processing.mp3");
+
+      const { result, error: transcriptionError } = await transcribeBlob(recent.audioBlob);
+
+      if (result) {
+        playSound("/sounds/transcription-finished.mp3");
+        setIsProcessing(false);
+        return result;
+      }
+
+      setError(`Retry failed: ${transcriptionError || "Unknown error"}`);
+      setIsProcessing(false);
+      return null;
+    } catch (err) {
+      console.error("[Transcription] Error during retryLast:", err);
+      setError(`Retry failed: ${err}`);
+      setIsProcessing(false);
+      return null;
+    }
+  }, [transcribeBlob]);
 
   // Retry a specific pending transcription
   const retryPending = useCallback(
@@ -376,7 +485,9 @@ export default function useTranscription(
     recordingDuration,
     startRecording,
     stopRecording,
+    cancelRecording,
     toggleRecording,
+    retryLast,
     retryPending,
     retryAllPending,
     getPendingTranscriptions: getAllPendingTranscriptions,

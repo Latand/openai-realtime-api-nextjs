@@ -148,7 +148,9 @@ declare global {
         openWindow: () => Promise<{ success: boolean; alreadyOpen?: boolean; error?: string }>;
         closeWindow: () => Promise<{ success: boolean }>;
         stop: () => Promise<{ success: boolean }>;
+        cancelWhisper: () => Promise<{ success: boolean; error?: string }>;
         clear: () => Promise<{ success: boolean }>;
+        retryLast: () => Promise<{ success: boolean; error?: string }>;
         updateText: (text: string, interim: string) => Promise<{ success: boolean }>;
         updateState: (state: { isListening?: boolean; isRecording: boolean; isProcessing: boolean; recordingDuration: number }) => Promise<{ success: boolean }>;
         startDrag: () => Promise<{ success: boolean; x?: number; y?: number }>;
@@ -157,7 +159,9 @@ declare global {
         onStateUpdate: (callback: (data: { isListening?: boolean; isRecording: boolean; isProcessing: boolean; recordingDuration: number }) => void) => () => void;
         onWindowClosed: (callback: () => void) => () => void;
         onStop: (callback: () => void) => () => void;
+        onCancelWhisper: (callback: () => void) => () => void;
         onClear: (callback: () => void) => () => void;
+        onRetryLast: (callback: () => void) => () => void;
       };
       textImprovement: {
         openWindow: (initialText?: string) => Promise<{ success: boolean; windowId?: number; error?: string }>;

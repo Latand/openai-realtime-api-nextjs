@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
-import { Wand2, X, Square, Trash2, Copy } from "lucide-react";
+import { Wand2, X, Square, Trash2, Copy, RotateCcw, CircleX } from "lucide-react";
 
 export default function TranscriptionPage() {
   // Override body background for transparent window
@@ -193,12 +193,58 @@ export default function TranscriptionPage() {
 
   // Close window
   const handleClose = useCallback(async () => {
+    // If Whisper is currently recording and user closes the window, cancel the recording
+    // (stop without transcribing). Safe no-op when not recording Whisper.
+    if (isRecording && !isProcessing && window.electron?.transcription?.cancelWhisper) {
+      try {
+        await window.electron.transcription.cancelWhisper();
+      } catch {
+        // ignore
+      }
+    }
     await window.electron?.transcription?.closeWindow?.();
-  }, []);
+  }, [isRecording, isProcessing]);
 
   // Stop recording
   const handleStop = useCallback(async () => {
     await window.electron?.transcription?.stop?.();
+  }, []);
+
+  const isWhisperUi = interim.toLowerCase().includes("whisper");
+
+  const handleCancel = useCallback(async () => {
+    try {
+      if (!window.electron?.transcription?.cancelWhisper) {
+        toast.error("Cancel is only available in the desktop app");
+        return;
+      }
+      await window.electron.transcription.cancelWhisper();
+      toast.info("Cancelled");
+    } catch (err) {
+      console.error("Cancel failed:", err);
+      toast.error("Cancel failed");
+    }
+  }, []);
+
+  const canRetry = !isListening && !isRecording && !isProcessing;
+
+  const handleRetry = useCallback(async () => {
+    try {
+      if (!window.electron?.transcription?.retryLast) {
+        toast.error("Retry is only available in the desktop app");
+        return;
+      }
+
+      const res = await window.electron.transcription.retryLast();
+      if (res && !res.success) {
+        toast.error(res.error || "Retry failed");
+      } else {
+        toast.info("Retrying last audio...");
+      }
+    } catch (err) {
+      console.error("Retry failed:", err);
+      toast.error("Retry failed");
+    }
   }, []);
 
   // Copy and close
@@ -314,6 +360,16 @@ export default function TranscriptionPage() {
                 <Square className="w-3.5 h-3.5 text-red-400 fill-current" />
                 </button>
             )}
+            {/* Whisper-only cancel: stop without transcribing */}
+            {isWhisperUi && isRecording && !isProcessing && !isListening && (
+              <button
+                onClick={handleCancel}
+                className="p-1.5 hover:bg-slate-700/80 rounded-lg transition-colors group"
+                title="Cancel (do not transcribe)"
+              >
+                <CircleX className="w-4 h-4 text-slate-400 group-hover:text-slate-200" />
+              </button>
+            )}
             <button
               onClick={handleClose}
               className="p-1.5 hover:bg-slate-700/80 rounded-lg transition-colors group"
@@ -403,6 +459,15 @@ export default function TranscriptionPage() {
               <Wand2 className={`w-4 h-4 ${isImproving ? "animate-spin" : ""}`} />
             </button>
           )}
+
+          <button
+            onClick={handleRetry}
+            disabled={!canRetry}
+            className="p-2 text-slate-400 bg-slate-700/40 hover:bg-slate-700/70 hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-all"
+            title="Retry last Whisper audio"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
 
           <button
             onClick={handleClear}

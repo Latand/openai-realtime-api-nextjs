@@ -20,6 +20,7 @@ export interface SmartTranscriptionState {
   chunks: TranscriptionChunk[];
   currentRMS: number;
   error: string | null;
+  recordingDurationSeconds: number;
 }
 
 export interface UseSmartTranscriptionOptions {
@@ -28,6 +29,7 @@ export interface UseSmartTranscriptionOptions {
   silenceThreshold?: number;
   deviceId?: string;
   onTranscriptionComplete?: (text: string) => void;
+  playSounds?: boolean;
 }
 
 export interface UseSmartTranscriptionReturn {
@@ -38,4 +40,3 @@ export interface UseSmartTranscriptionReturn {
   stop: () => Promise<string>;
   clear: () => void;
 }
-

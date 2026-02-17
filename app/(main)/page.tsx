@@ -19,19 +19,12 @@ import { playSound } from "@/lib/tools";
 import { Conversation } from "@/lib/conversations";
 import { toast } from "sonner";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Settings, Mic } from "lucide-react";
+import { Settings, AudioLines, FileAudio, Mic, MicOff } from "lucide-react";
 import Link from "next/link";
 
 import { MinimalCostDisplay } from "@/components/minimal-cost-display";
@@ -267,6 +260,8 @@ function AppContent() {
     isProcessing: isWhisperProcessing,
     startRecording: startWhisperRecording,
     stopRecording: stopWhisperRecording,
+    cancelRecording: cancelWhisperRecording,
+    retryLast: retryLastWhisperRecording,
     analyser: whisperAnalyser,
   } = useTranscription(selectedMicrophoneId);
 
@@ -332,18 +327,6 @@ function AppContent() {
         if (result?.success && result.settings?.selectedMicrophoneId) {
           debug("[Settings] Loaded saved microphone:", result.settings.selectedMicrophoneId);
           setSelectedMicrophoneId(result.settings.selectedMicrophoneId as string);
-        } else {
-          // If no saved microphone, try to get the first available one
-          try {
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            const audioInputs = devices.filter(d => d.kind === "audioinput");
-            if (audioInputs.length > 0) {
-              debug("[Settings] Auto-selecting first microphone:", audioInputs[0].label);
-              setSelectedMicrophoneId(audioInputs[0].deviceId);
-            }
-          } catch (err) {
-            console.warn("[Microphone] Failed to enumerate devices:", err);
-          }
         }
 
         // Load Picovoice key
@@ -478,18 +461,30 @@ function AppContent() {
 
   // Send smart transcription state updates to window
   useEffect(() => {
+    const isListening = smartState.status === "listening";
+    const isRecording = smartState.status === "recording";
+    const isProcessing = smartState.status === "processing";
+
     if (smartState.status !== "idle") {
-      const isListening = smartState.status === "listening";
-      const isRecording = smartState.status === "recording";
-      const isProcessing = smartState.status === "processing";
       window.electron?.transcription?.updateState?.({
         isListening,
         isRecording,
         isProcessing,
-        recordingDuration: 0, // Smart mode doesn't track duration the same way
+        recordingDuration: smartState.recordingDurationSeconds || 0,
+      });
+      return;
+    }
+
+    // When Smart stops, explicitly reset the overlay state, but don't clobber Whisper UI.
+    if (!isWhisperRecording && !isWhisperProcessing) {
+      window.electron?.transcription?.updateState?.({
+        isListening: false,
+        isRecording: false,
+        isProcessing: false,
+        recordingDuration: 0,
       });
     }
-  }, [smartState.status]);
+  }, [smartState.status, smartState.recordingDurationSeconds, isWhisperRecording, isWhisperProcessing]);
 
   // Update transcription window for Whisper mode recording status
   // Note: Processing state is handled directly in handleWhisperToggle for better timing
@@ -506,11 +501,13 @@ function AppContent() {
       if (isTranscribing) {
         stopTranscription();
       }
-      // Note: Can't easily stop Whisper recording here since stopWhisperRecording returns a promise
-      // The window close will just close the UI, recording will stop on next toggle
+      // Cancel Whisper recording when the window is closed (stop without transcribing)
+      if (isWhisperRecording) {
+        cancelWhisperRecording();
+      }
     });
     return () => unsubscribe?.();
-  }, [isTranscribing, stopTranscription]);
+  }, [isTranscribing, stopTranscription, isWhisperRecording, cancelWhisperRecording]);
 
   // Listen for transcription stop event from IPC
   useEffect(() => {
@@ -531,6 +528,64 @@ function AppContent() {
     return () => unsubscribe?.();
   }, [isTranscribing, stopTranscription, isWhisperRecording, stopWhisperRecording]);
 
+  // Listen for Whisper cancel event from IPC (stop without transcribing)
+  useEffect(() => {
+    const unsubscribe = window.electron?.transcription?.onCancelWhisper?.(() => {
+      console.log("[Transcription] Cancel Whisper command received from IPC");
+      if (isWhisperRecording) {
+        cancelWhisperRecording();
+        window.electron?.transcription?.updateText?.("", "Cancelled");
+      }
+    });
+    return () => unsubscribe?.();
+  }, [isWhisperRecording, cancelWhisperRecording]);
+
+  const handleWhisperRetryLast = useCallback(async () => {
+    if (isSessionActive) {
+      toast.error("Stop voice session first to use transcription mode");
+      return;
+    }
+    if (isTranscribing || isTranscribingConnecting) {
+      toast.error("Stop real-time transcription first");
+      return;
+    }
+    if (isWhisperRecording || isWhisperProcessing) {
+      toast.error("Stop Whisper recording first");
+      return;
+    }
+
+    // Ensure window is open (if user triggers retry from elsewhere)
+    await window.electron?.transcription?.openWindow?.();
+    await window.electron?.transcription?.updateText?.("", "Retrying last audio...");
+
+    const result = await retryLastWhisperRecording();
+
+    if (result?.text) {
+      try {
+        if (window.electron?.clipboard) {
+          await window.electron.clipboard.write(result.text);
+        } else {
+          await navigator.clipboard.writeText(result.text);
+        }
+        toast.success("Transcription copied to clipboard");
+      } catch (err) {
+        console.error("Failed to copy transcription:", err);
+      }
+
+      await window.electron?.transcription?.updateText?.(result.text, "");
+    } else {
+      await window.electron?.transcription?.updateText?.("", "Retry failed");
+      toast.error("Retry failed");
+    }
+  }, [
+    isSessionActive,
+    isTranscribing,
+    isTranscribingConnecting,
+    isWhisperRecording,
+    isWhisperProcessing,
+    retryLastWhisperRecording,
+  ]);
+
   // Listen for transcription clear event from IPC (when user clicks Clear in window)
   useEffect(() => {
     const unsubscribe = window.electron?.transcription?.onClear?.(() => {
@@ -539,6 +594,15 @@ function AppContent() {
     });
     return () => unsubscribe?.();
   }, [clearTranscription]);
+
+  // Listen for "retry last" event from IPC (button in the overlay window)
+  useEffect(() => {
+    const unsubscribe = window.electron?.transcription?.onRetryLast?.(() => {
+      console.log("[Transcription] Retry last command received from IPC");
+      handleWhisperRetryLast();
+    });
+    return () => unsubscribe?.();
+  }, [handleWhisperRetryLast]);
 
   // Listen for text improvement window closed
   useEffect(() => {
@@ -1060,36 +1124,8 @@ function AppContent() {
         </div>
 
         {/* Action Buttons Row - Operational Controls */}
-        <div className="flex items-center justify-center p-2 bg-slate-900/40 backdrop-blur-xl border border-white/5 rounded-2xl gap-3 shadow-2xl ring-1 ring-white/5">
-          
-          {/* Microphone Selector */}
-          <Dialog>
-            <DialogTrigger asChild>
-              <button
-                className="group p-3 bg-slate-800/50 hover:bg-slate-700/70 border border-slate-600/30 hover:border-slate-500/50 text-slate-400 hover:text-white rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 flex items-center gap-2"
-                title="Select Microphone"
-              >
-                <Mic className="w-5 h-5" />
-                <span className="hidden sm:inline font-medium text-sm">Mic</span>
-              </button>
-            </DialogTrigger>
-            <DialogContent className="bg-slate-900 border-slate-800 text-slate-100 sm:max-w-[425px]">
-              <DialogHeader>
-                <DialogTitle>Select Microphone</DialogTitle>
-              </DialogHeader>
-              <div className="py-4">
-                <MicrophoneSelector
-                  value={selectedMicrophoneId}
-                  onValueChange={setSelectedMicrophoneId}
-                  disabled={isSessionActive}
-                  settingsLoaded={microphoneLoaded}
-                />
-              </div>
-            </DialogContent>
-          </Dialog>
-
-          {/* Divider */}
-          <div className="w-px h-8 bg-white/10 mx-1" />
+        <div className="flex flex-col items-stretch justify-center p-2 bg-slate-900/40 backdrop-blur-xl border border-white/5 rounded-2xl gap-2 shadow-2xl ring-1 ring-white/5 w-full max-w-md">
+          <div className="flex items-center justify-center gap-3 flex-wrap">
 
           {/* Real-time Transcription Button (Ctrl+Shift+T) */}
           <button
@@ -1104,16 +1140,10 @@ function AppContent() {
                 ? "bg-slate-800/30 border border-slate-700/20 text-slate-600 cursor-not-allowed opacity-50"
                 : "bg-slate-800/50 hover:bg-purple-500/20 border border-slate-600/30 hover:border-purple-400/30 text-slate-400 hover:text-purple-300"
             }`}
-            title={isTranscribing ? "Stop Live (Ctrl+Shift+T)" : "Live transcription (Ctrl+Shift+T)"}
+            title={isTranscribing ? "Stop Smart (Ctrl+Shift+T)" : "Smart transcription (Ctrl+Shift+T)"}
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
-              {isTranscribing ? (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z" />
-              ) : (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-              )}
-            </svg>
-            <span className="hidden sm:inline font-medium text-sm">{isTranscribing ? "Stop Live" : "Live"}</span>
+            <AudioLines className="w-5 h-5" />
+            <span className="hidden sm:inline font-medium text-sm">{isTranscribing ? "Stop" : "Smart"}</span>
           </button>
 
           {/* Whisper Transcription Button (Ctrl+Shift+R) */}
@@ -1129,20 +1159,11 @@ function AppContent() {
                 ? "bg-slate-800/30 border border-slate-700/20 text-slate-600 cursor-not-allowed opacity-50"
                 : "bg-slate-800/50 hover:bg-orange-500/20 border border-slate-600/30 hover:border-orange-400/30 text-slate-400 hover:text-orange-300"
             }`}
-            title={isWhisperRecording ? "Stop Whisper (Ctrl+Shift+R)" : "Whisper transcription (Ctrl+Shift+R)"}
+            title={isWhisperRecording ? "Stop HQ (Ctrl+Shift+R)" : "HQ transcription (Ctrl+Shift+R)"}
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
-              {isWhisperRecording ? (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z" />
-              ) : (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
-              )}
-            </svg>
-            <span className="hidden sm:inline font-medium text-sm">{isWhisperRecording ? "Stop Whisper" : "Whisper"}</span>
+            <FileAudio className="w-5 h-5" />
+            <span className="hidden sm:inline font-medium text-sm">{isWhisperRecording ? "Stop" : "HQ"}</span>
           </button>
-
-          {/* Divider */}
-          <div className="w-px h-8 bg-white/10 mx-1" />
 
           {/* Mute Button */}
           <button
@@ -1160,18 +1181,22 @@ function AppContent() {
             }`}
             title={isMuted ? "Unmute (Ctrl+Shift+M)" : "Mute (Ctrl+Shift+M)"}
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
-              {isMuted ? (
-                <>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 3l18 18" />
-                </>
-              ) : (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-              )}
-            </svg>
-            <span className="hidden sm:inline font-medium text-sm">{isMuted ? "Unmuted" : "Mute"}</span>
+            {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+            <span className="hidden sm:inline font-medium text-sm">{isMuted ? "Unmute" : "Mute"}</span>
           </button>
+          </div>
+
+          {/* Microphone Selector (below buttons to fit smaller windows) */}
+          <div className="flex items-center justify-center pt-1">
+            <MicrophoneSelector
+              value={selectedMicrophoneId}
+              onValueChange={setSelectedMicrophoneId}
+              disabled={isSessionActive}
+              settingsLoaded={microphoneLoaded}
+              hideLabel
+              triggerClassName="w-[260px] sm:w-[320px] h-11 bg-slate-800/50 hover:bg-slate-700/70 border border-slate-600/30 hover:border-slate-500/50 text-slate-200 rounded-xl transition-all duration-200 px-3 gap-2"
+            />
+          </div>
         </div>
 
         {/* Chat Input */}

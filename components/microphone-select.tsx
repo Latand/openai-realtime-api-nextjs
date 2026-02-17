@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Select,
   SelectContent,
@@ -9,12 +9,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { Mic2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface MicrophoneSelectorProps {
   value: string;
   onValueChange: (value: string) => void;
   disabled?: boolean;
   settingsLoaded?: boolean; // Wait for settings before auto-selecting
+  hideLabel?: boolean;
+  triggerClassName?: string;
 }
 
 export function useMicrophoneDevices() {
@@ -75,8 +79,11 @@ export function MicrophoneSelector({
   onValueChange,
   disabled = false,
   settingsLoaded = true,
+  hideLabel = false,
+  triggerClassName,
 }: MicrophoneSelectorProps) {
   const { devices, error, isLoading } = useMicrophoneDevices();
+  const didInitialAutoPickRef = useRef(false);
 
   // Auto-select first device if none selected (or saved device no longer exists)
   useEffect(() => {
@@ -85,10 +92,26 @@ export function MicrophoneSelector({
     // Check if current value is valid (exists in devices list)
     const valueIsValid = value && devices.some(d => d.deviceId === value);
 
+    // Prefer a known-good USB mic name if present (your setup typically uses "Maono"),
+    // otherwise fall back to the system default device, otherwise first device.
+    const maono = devices.find(d => (d.label || "").toLowerCase().includes("maono") && d.deviceId !== "default")
+      ?? devices.find(d => (d.label || "").toLowerCase().includes("maono"));
+    const systemDefault = devices.find(d => d.deviceId === "default");
+    const preferred = maono ?? systemDefault ?? devices[0];
+
     if (!valueIsValid) {
-      // Auto-select first device
-      console.log("[MicrophoneSelector] Auto-selecting first device:", devices[0].label);
-      onValueChange(devices[0].deviceId);
+      console.log("[MicrophoneSelector] Auto-selecting device:", preferred.label || preferred.deviceId);
+      onValueChange(preferred.deviceId);
+      didInitialAutoPickRef.current = true;
+      return;
+    }
+
+    // One-time startup fix: if settings loaded "default" but we have a concrete Maono device,
+    // switch once to reduce surprise, while still allowing the user to select "default" later.
+    if (!didInitialAutoPickRef.current && value === "default" && maono && maono.deviceId !== "default") {
+      console.log("[MicrophoneSelector] Startup prefer Maono over system default:", maono.label || maono.deviceId);
+      onValueChange(maono.deviceId);
+      didInitialAutoPickRef.current = true;
     }
   }, [devices, value, onValueChange, isLoading, settingsLoaded]);
 
@@ -104,18 +127,19 @@ export function MicrophoneSelector({
 
   return (
     <div className="form-group space-y-2">
-      <Label htmlFor="microphoneSelect" className="text-sm font-medium">
-        Microphone
-      </Label>
+      {!hideLabel && (
+        <Label htmlFor="microphoneSelect" className="text-sm font-medium">
+          Microphone
+        </Label>
+      )}
       <Select
         value={value}
         onValueChange={onValueChange}
         disabled={disabled || isLoading}
       >
-        <SelectTrigger className="w-full">
-          <SelectValue
-            placeholder={isLoading ? "Loading devices..." : "Select microphone"}
-          />
+        <SelectTrigger className={cn("w-full", triggerClassName)}>
+          {hideLabel && <Mic2 className="w-4 h-4 text-slate-400" />}
+          <SelectValue placeholder={isLoading ? "Loading..." : "Select mic"} />
         </SelectTrigger>
         <SelectContent>
           {devices.map((device, index) => (
