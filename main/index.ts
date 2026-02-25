@@ -31,12 +31,221 @@ const textImprovementWindows: Map<number, BrowserWindow> = new Map();
 let nextServer: Server | null = null;
 let nextServerUrl: string | null = null;
 
+type VolumeBackend = "wpctl" | "pactl";
+
+const transcriptionAudioDuckState = {
+  isDucked: false,
+  originalVolumePercentage: null as number | null,
+  targetVolumePercentage: 20,
+};
+
+let transcriptionAudioQueue: Promise<unknown> = Promise.resolve();
+
 function clampPercentage(percentage: number) {
   const value = Number(percentage);
   if (!Number.isFinite(value)) {
     throw new Error("Invalid percentage");
   }
   return Math.min(Math.max(value, 0), 100);
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+function withSerializedTranscriptionAudioTask<T>(task: () => Promise<T>): Promise<T> {
+  const run = transcriptionAudioQueue.then(task, task);
+  transcriptionAudioQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function withVolumeBackend<T>(
+  operationName: string,
+  operation: (backend: VolumeBackend) => Promise<T>
+): Promise<T> {
+  const backends: VolumeBackend[] = ["wpctl", "pactl"];
+  const errors: string[] = [];
+
+  for (const backend of backends) {
+    try {
+      return await operation(backend);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push(`${backend}: ${message}`);
+    }
+  }
+
+  throw new Error(
+    `${operationName} failed. Tried backends: ${errors.join(" | ")}`
+  );
+}
+
+async function getSystemVolumePercentage(): Promise<number> {
+  if (process.platform !== "linux") {
+    throw new Error("System volume control is only supported on Linux");
+  }
+
+  return withVolumeBackend("Get system volume", async (backend) => {
+    if (backend === "wpctl") {
+      const { stdout } = await execFileAsync("wpctl", [
+        "get-volume",
+        "@DEFAULT_AUDIO_SINK@",
+      ]);
+      const match = stdout.match(/Volume:\s*([0-9.]+)/i);
+      if (!match) {
+        throw new Error(`Unexpected wpctl output: ${stdout.trim()}`);
+      }
+      return clampPercentage(parseFloat(match[1]) * 100);
+    }
+
+    const { stdout } = await execFileAsync("pactl", [
+      "get-sink-volume",
+      "@DEFAULT_SINK@",
+    ]);
+    const match = stdout.match(/(\d+)%/);
+    if (!match) {
+      throw new Error(`Unexpected pactl output: ${stdout.trim()}`);
+    }
+    return clampPercentage(Number(match[1]));
+  });
+}
+
+async function setSystemVolumePercentage(percentage: number): Promise<void> {
+  if (process.platform !== "linux") {
+    throw new Error("System volume control is only supported on Linux");
+  }
+
+  const safePercentage = clampPercentage(percentage);
+  await withVolumeBackend("Set system volume", async (backend) => {
+    if (backend === "wpctl") {
+      await execFileAsync("wpctl", [
+        "set-volume",
+        "@DEFAULT_AUDIO_SINK@",
+        `${safePercentage}%`,
+      ]);
+      return;
+    }
+
+    await execFileAsync("pactl", [
+      "set-sink-volume",
+      "@DEFAULT_SINK@",
+      `${safePercentage}%`,
+    ]);
+  });
+}
+
+async function fadeSystemVolume(
+  fromPercentage: number,
+  toPercentage: number,
+  durationMs: number
+): Promise<void> {
+  const from = clampPercentage(fromPercentage);
+  const to = clampPercentage(toPercentage);
+  const safeDuration = Math.max(0, Math.floor(durationMs));
+
+  if (safeDuration === 0 || Math.abs(to - from) < 0.5) {
+    await setSystemVolumePercentage(to);
+    return;
+  }
+
+  const stepCount = Math.max(1, Math.round(safeDuration / 40));
+  const stepDurationMs = safeDuration / stepCount;
+
+  for (let step = 1; step <= stepCount; step += 1) {
+    const nextValue = from + (to - from) * (step / stepCount);
+    await setSystemVolumePercentage(nextValue);
+    if (step < stepCount) {
+      await sleep(stepDurationMs);
+    }
+  }
+}
+
+async function duckTranscriptionSystemAudio(
+  targetPercentage = 20,
+  durationMs = 300
+) {
+  if (process.platform !== "linux") {
+    return { success: true, skipped: true };
+  }
+
+  return withSerializedTranscriptionAudioTask(async () => {
+    if (transcriptionAudioDuckState.isDucked) {
+      return {
+        success: true,
+        alreadyDucked: true,
+        targetVolumePercentage: transcriptionAudioDuckState.targetVolumePercentage,
+      };
+    }
+
+    let originalVolume: number | null = null;
+    try {
+      originalVolume = await getSystemVolumePercentage();
+      const clampedTarget = clampPercentage(targetPercentage);
+      await fadeSystemVolume(originalVolume, clampedTarget, durationMs);
+
+      transcriptionAudioDuckState.isDucked = true;
+      transcriptionAudioDuckState.originalVolumePercentage = originalVolume;
+      transcriptionAudioDuckState.targetVolumePercentage = clampedTarget;
+
+      return {
+        success: true,
+        originalVolumePercentage: originalVolume,
+        targetVolumePercentage: clampedTarget,
+      };
+    } catch (error) {
+      if (originalVolume !== null) {
+        try {
+          await setSystemVolumePercentage(originalVolume);
+        } catch (restoreError) {
+          console.warn(
+            "[SystemVolume] Failed to recover original volume after duck failure:",
+            restoreError
+          );
+        }
+      }
+      transcriptionAudioDuckState.isDucked = false;
+      transcriptionAudioDuckState.originalVolumePercentage = null;
+      throw error;
+    }
+  });
+}
+
+async function restoreTranscriptionSystemAudio(durationMs = 400) {
+  if (process.platform !== "linux") {
+    return { success: true, skipped: true };
+  }
+
+  return withSerializedTranscriptionAudioTask(async () => {
+    if (
+      !transcriptionAudioDuckState.isDucked ||
+      transcriptionAudioDuckState.originalVolumePercentage === null
+    ) {
+      return { success: true, skipped: true };
+    }
+
+    const restoreTo = clampPercentage(
+      transcriptionAudioDuckState.originalVolumePercentage
+    );
+    let currentVolume = transcriptionAudioDuckState.targetVolumePercentage;
+
+    try {
+      currentVolume = await getSystemVolumePercentage();
+    } catch (error) {
+      console.warn(
+        "[SystemVolume] Failed to read current volume before restore, using fallback:",
+        error
+      );
+    }
+
+    try {
+      await fadeSystemVolume(currentVolume, restoreTo, durationMs);
+      return { success: true, restoredVolumePercentage: restoreTo };
+    } finally {
+      transcriptionAudioDuckState.isDucked = false;
+      transcriptionAudioDuckState.originalVolumePercentage = null;
+      transcriptionAudioDuckState.targetVolumePercentage = restoreTo;
+    }
+  });
 }
 
 async function startNextServer(): Promise<string> {
@@ -501,6 +710,12 @@ app.on("will-quit", async () => {
   // Unregister all global shortcuts
   globalShortcut.unregisterAll();
 
+  try {
+    await restoreTranscriptionSystemAudio(150);
+  } catch (error) {
+    console.warn("[SystemVolume] Failed to restore volume on quit:", error);
+  }
+
   // Cleanup MCP service
   await mcpService.disconnect();
   await stopNextServer();
@@ -548,16 +763,9 @@ async function adjustSystemVolume(
   percentage: number
 ): Promise<{ success: boolean }> {
   try {
-    if (process.platform !== "linux") {
-      throw new Error("System volume control is only supported on Linux");
-    }
     const safePercentage = clampPercentage(percentage);
     console.log(`[SystemVolume] Setting volume to ${safePercentage}%`);
-    await execFileAsync("wpctl", [
-      "set-volume",
-      "@DEFAULT_AUDIO_SINK@",
-      `${safePercentage}%`,
-    ]);
+    await setSystemVolumePercentage(safePercentage);
     return { success: true };
   } catch (error) {
     console.error("[SystemVolume] Failed to adjust volume:", error);
@@ -577,6 +785,45 @@ ipcMain.handle("system:adjustSystemVolume", async (_, percentage: number) => {
     };
   }
 });
+
+ipcMain.handle(
+  "transcription:duckSystemAudio",
+  async (
+    _,
+    options?: { targetPercentage?: number; durationMs?: number }
+  ) => {
+    try {
+      const targetPercentage =
+        typeof options?.targetPercentage === "number"
+          ? options.targetPercentage
+          : 20;
+      const durationMs =
+        typeof options?.durationMs === "number" ? options.durationMs : 300;
+      return await duckTranscriptionSystemAudio(targetPercentage, durationMs);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+);
+
+ipcMain.handle(
+  "transcription:restoreSystemAudio",
+  async (_, options?: { durationMs?: number }) => {
+    try {
+      const durationMs =
+        typeof options?.durationMs === "number" ? options.durationMs : 400;
+      return await restoreTranscriptionSystemAudio(durationMs);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+);
 
 // Clipboard controls
 ipcMain.handle("clipboard:writeAndPaste", async (_, text: string) => {

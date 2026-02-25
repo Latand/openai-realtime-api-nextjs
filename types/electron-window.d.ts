@@ -149,6 +149,20 @@ declare global {
         closeWindow: () => Promise<{ success: boolean }>;
         stop: () => Promise<{ success: boolean }>;
         cancelWhisper: () => Promise<{ success: boolean; error?: string }>;
+        duckSystemAudio: (targetPercentage?: number, durationMs?: number) => Promise<{
+          success: boolean;
+          skipped?: boolean;
+          alreadyDucked?: boolean;
+          originalVolumePercentage?: number;
+          targetVolumePercentage?: number;
+          error?: string;
+        }>;
+        restoreSystemAudio: (durationMs?: number) => Promise<{
+          success: boolean;
+          skipped?: boolean;
+          restoredVolumePercentage?: number;
+          error?: string;
+        }>;
         clear: () => Promise<{ success: boolean }>;
         retryLast: () => Promise<{ success: boolean; error?: string }>;
         updateText: (text: string, interim: string) => Promise<{ success: boolean }>;

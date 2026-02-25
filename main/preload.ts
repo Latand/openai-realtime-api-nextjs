@@ -93,6 +93,10 @@ contextBridge.exposeInMainWorld("electron", {
     closeWindow: () => ipcRenderer.invoke("transcription:closeWindow"),
     stop: () => ipcRenderer.invoke("transcription:stop"),
     cancelWhisper: () => ipcRenderer.invoke("transcription:cancelWhisper"),
+    duckSystemAudio: (targetPercentage?: number, durationMs?: number) =>
+      ipcRenderer.invoke("transcription:duckSystemAudio", { targetPercentage, durationMs }),
+    restoreSystemAudio: (durationMs?: number) =>
+      ipcRenderer.invoke("transcription:restoreSystemAudio", { durationMs }),
     clear: () => ipcRenderer.invoke("transcription:clear"),
     retryLast: () => ipcRenderer.invoke("transcription:retryLast"),
     updateText: (text: string, interim: string) =>

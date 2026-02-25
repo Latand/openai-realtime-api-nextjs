@@ -40,6 +40,19 @@ interface UseTranscriptionReturn {
   analyser: AnalyserNode | null;
 }
 
+// Common Whisper hallucinations to filter out
+const HALLUCINATION_PATTERNS = [
+  /дякую за перегляд/i,
+  /до зустрічі/i,
+  /підписуйтесь/i,
+  /thanks for watching/i,
+  /subscribe/i,
+  /see you next time/i,
+  /thank you for listening/i,
+  /спасибо за просмотр/i,
+  /до свидания/i,
+];
+
 export default function useTranscription(
   selectedMicrophoneId?: string
 ): UseTranscriptionReturn {
@@ -57,6 +70,7 @@ export default function useTranscription(
   const recordingStartTimeRef = useRef<number>(0);
   const stopInFlightRef = useRef(false);
   const durationIntervalRef = useRef<number | null>(null);
+  const isSystemAudioDuckedRef = useRef(false);
 
   // Sync state with overlay window
   useEffect(() => {
@@ -104,18 +118,41 @@ export default function useTranscription(
     }
   }, []);
 
-  // Common Whisper hallucinations to filter out
-  const HALLUCINATION_PATTERNS = [
-    /дякую за перегляд/i,
-    /до зустрічі/i,
-    /підписуйтесь/i,
-    /thanks for watching/i,
-    /subscribe/i,
-    /see you next time/i,
-    /thank you for listening/i,
-    /спасибо за просмотр/i,
-    /до свидания/i,
-  ];
+  const duckSystemAudioForRecording = useCallback(async () => {
+    if (isSystemAudioDuckedRef.current) return;
+
+    try {
+      const result = await window.electron?.transcription?.duckSystemAudio?.(20, 320);
+      if (result?.success) {
+        isSystemAudioDuckedRef.current = true;
+      } else if (result?.error) {
+        console.warn("[Transcription] Failed to duck system audio:", result.error);
+      }
+    } catch (err) {
+      console.warn("[Transcription] Failed to duck system audio:", err);
+    }
+  }, []);
+
+  const restoreSystemAudioAfterRecording = useCallback(async () => {
+    if (!isSystemAudioDuckedRef.current) return;
+
+    try {
+      const result = await window.electron?.transcription?.restoreSystemAudio?.(420);
+      if (result?.success) {
+        isSystemAudioDuckedRef.current = false;
+      } else if (result?.error) {
+        console.warn("[Transcription] Failed to restore system audio:", result.error);
+      }
+    } catch (err) {
+      console.warn("[Transcription] Failed to restore system audio:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      void restoreSystemAudioAfterRecording();
+    };
+  }, [restoreSystemAudioAfterRecording]);
 
   // Helper to transcribe a blob
   const transcribeBlob = useCallback(
@@ -166,6 +203,8 @@ export default function useTranscription(
   );
 
   const startRecording = useCallback(async () => {
+    await duckSystemAudioForRecording();
+
     try {
       setError(null);
 
@@ -217,8 +256,13 @@ export default function useTranscription(
     } catch (err) {
       console.error("Error starting recording:", err);
       setError(`Failed to start recording: ${err}`);
+      await restoreSystemAudioAfterRecording();
     }
-  }, [selectedMicrophoneId]);
+  }, [
+    duckSystemAudioForRecording,
+    restoreSystemAudioAfterRecording,
+    selectedMicrophoneId,
+  ]);
 
   const stopAndCollectAudio = useCallback(async (): Promise<{ audioBlob: Blob; duration: number } | null> => {
     const mediaRecorder = mediaRecorderRef.current;
@@ -275,67 +319,76 @@ export default function useTranscription(
     // Play sound to indicate recording stopped, now processing
     playSound("/sounds/transcription-processing.mp3");
 
-    const collected = await stopAndCollectAudio();
-    if (!collected) {
-      setIsProcessing(false);
-      return null;
-    }
-
-    const { audioBlob, duration } = collected;
-
-    // Always keep the last Whisper recording around for "Retry last" (even on success).
-    saveRecentRecording(audioBlob, { kind: "whisper", durationSeconds: duration }).catch((err) => {
-      console.warn("[Transcription] Failed to save recent recording:", err);
-    });
-
     try {
-      const { result, error: transcriptionError, retryable } = await transcribeBlob(audioBlob);
-
-      if (result) {
-        // Log cost
-        const minutes = duration / 60;
-        const cost = minutes * PRICING['whisper-1'].per_minute;
-        addCostLog({
-            model: 'whisper-1',
-            type: 'transcription',
-            seconds: duration,
-            cost,
-            metadata: { duration }
-        }).catch(e => console.error("Failed to log cost:", e));
-
-        playSound("/sounds/transcription-finished.mp3");
+      const collected = await stopAndCollectAudio();
+      if (!collected) {
         setIsProcessing(false);
-        return result;
+        return null;
       }
 
-      // Transcription failed
-      if (retryable) {
-        // Save for retry
-        const savedId = await savePendingTranscription(audioBlob, transcriptionError);
-        console.log("[Transcription] Saved for retry:", savedId);
-        await refreshPendingCount();
-        playSound("/sounds/session-end.mp3");
-        setError(`Transcription failed, saved for retry: ${transcriptionError}`);
-      } else {
-        setError(`Transcription failed: ${transcriptionError}`);
-      }
-      setIsProcessing(false);
-      return null;
-    } catch (err) {
-      console.error("Error transcribing:", err);
-      // Save for retry on unexpected errors
+      const { audioBlob, duration } = collected;
+
+      // Always keep the last Whisper recording around for "Retry last" (even on success).
+      saveRecentRecording(audioBlob, { kind: "whisper", durationSeconds: duration }).catch((err) => {
+        console.warn("[Transcription] Failed to save recent recording:", err);
+      });
+
       try {
-        const savedId = await savePendingTranscription(audioBlob, String(err));
-        console.log("[Transcription] Saved for retry after error:", savedId);
-        await refreshPendingCount();
-      } catch (saveErr) {
-        console.error("[Transcription] Failed to save for retry:", saveErr);
+        const { result, error: transcriptionError, retryable } = await transcribeBlob(audioBlob);
+
+        if (result) {
+          // Log cost
+          const minutes = duration / 60;
+          const cost = minutes * PRICING['whisper-1'].per_minute;
+          addCostLog({
+              model: 'whisper-1',
+              type: 'transcription',
+              seconds: duration,
+              cost,
+              metadata: { duration }
+          }).catch(e => console.error("Failed to log cost:", e));
+
+          playSound("/sounds/transcription-finished.mp3");
+          setIsProcessing(false);
+          return result;
+        }
+
+        // Transcription failed
+        if (retryable) {
+          // Save for retry
+          const savedId = await savePendingTranscription(audioBlob, transcriptionError);
+          console.log("[Transcription] Saved for retry:", savedId);
+          await refreshPendingCount();
+          playSound("/sounds/session-end.mp3");
+          setError(`Transcription failed, saved for retry: ${transcriptionError}`);
+        } else {
+          setError(`Transcription failed: ${transcriptionError}`);
+        }
+        setIsProcessing(false);
+        return null;
+      } catch (err) {
+        console.error("Error transcribing:", err);
+        // Save for retry on unexpected errors
+        try {
+          const savedId = await savePendingTranscription(audioBlob, String(err));
+          console.log("[Transcription] Saved for retry after error:", savedId);
+          await refreshPendingCount();
+        } catch (saveErr) {
+          console.error("[Transcription] Failed to save for retry:", saveErr);
+        }
+        setError(`Transcription failed: ${err}`);
+        setIsProcessing(false);
+        return null;
       }
-      setError(`Transcription failed: ${err}`);
-      setIsProcessing(false);
-      return null;
+    } finally {
+      await restoreSystemAudioAfterRecording();
     }
-  }, [refreshPendingCount, stopAndCollectAudio, transcribeBlob]);
+  }, [
+    refreshPendingCount,
+    restoreSystemAudioAfterRecording,
+    stopAndCollectAudio,
+    transcribeBlob,
+  ]);
 
   const cancelRecording = useCallback(async (): Promise<void> => {
     setError(null);
@@ -344,12 +397,16 @@ export default function useTranscription(
     setIsRecording(false);
     setIsProcessing(false);
 
-    const collected = await stopAndCollectAudio();
-    if (!collected) return;
+    try {
+      const collected = await stopAndCollectAudio();
+      if (!collected) return;
 
-    // Intentionally do not transcribe and do not save into "recent" cache.
-    playSound("/sounds/session-end.mp3");
-  }, [stopAndCollectAudio]);
+      // Intentionally do not transcribe and do not save into "recent" cache.
+      playSound("/sounds/session-end.mp3");
+    } finally {
+      await restoreSystemAudioAfterRecording();
+    }
+  }, [restoreSystemAudioAfterRecording, stopAndCollectAudio]);
 
   const toggleRecording = useCallback(async (): Promise<TranscriptionResult | null> => {
     if (isRecording) {
