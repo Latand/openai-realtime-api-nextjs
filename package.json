@@ -15,8 +15,11 @@
     "start": "next start",
     "lint": "next lint",
     "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && tsc -p main && electron .\"",
+    "electron-dev:wayland": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && tsc -p main && electron . --enable-features=GlobalShortcutsPortal,UseOzonePlatform --ozone-platform=wayland\"",
     "electron-build": "next build && tsc -p main && electron-builder",
-    "electron-start": "tsc -p main && electron ."
+    "electron-start": "tsc -p main && electron .",
+    "electron-start:wayland": "tsc -p main && electron . --enable-features=GlobalShortcutsPortal,UseOzonePlatform --ozone-platform=wayland",
+    "electron-toggle-whisper": "tsc -p main && electron . --toggle-whisper"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",

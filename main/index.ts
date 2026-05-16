@@ -25,11 +25,101 @@ const execFileAsync = promisify(execFile);
 const execAsync = promisify(exec);
 const isDevelopment = !app.isPackaged;
 
+type CliActions = {
+  toggleWhisper: boolean;
+};
+
+const pendingCliActions: CliActions = {
+  toggleWhisper: false,
+};
+
+function parseCliActions(argv: string[]): CliActions {
+  return {
+    toggleWhisper: argv.includes("--toggle-whisper"),
+  };
+}
+
+function queueCliActions(argv: string[]) {
+  const actions = parseCliActions(argv);
+  pendingCliActions.toggleWhisper =
+    pendingCliActions.toggleWhisper || actions.toggleWhisper;
+}
+
+function getCliSwitchValue(name: string): string | null {
+  const prefix = `--${name}=`;
+  const valueArg = process.argv.find((arg) => arg.startsWith(prefix));
+  if (valueArg) {
+    return valueArg.slice(prefix.length);
+  }
+
+  const index = process.argv.findIndex((arg) => arg === `--${name}`);
+  if (index >= 0 && process.argv[index + 1] && !process.argv[index + 1].startsWith("--")) {
+    return process.argv[index + 1];
+  }
+
+  return null;
+}
+
+const isLinuxWaylandSession =
+  process.platform === "linux" &&
+  (process.env.XDG_SESSION_TYPE === "wayland" || Boolean(process.env.WAYLAND_DISPLAY));
+
+if (isLinuxWaylandSession) {
+  const existingFeatures = (getCliSwitchValue("enable-features") ?? "")
+    .split(",")
+    .map((feature) => feature.trim())
+    .filter(Boolean);
+  const requiredFeatures = ["GlobalShortcutsPortal"];
+  const mergedFeatures = Array.from(new Set([...existingFeatures, ...requiredFeatures]));
+  app.commandLine.appendSwitch("enable-features", mergedFeatures.join(","));
+
+  // Avoid forcing ozone platform here to keep app startup stable across
+  // different Wayland stacks. User can still override with CLI flags.
+  if (!getCliSwitchValue("ozone-platform") && !getCliSwitchValue("ozone-platform-hint")) {
+    app.commandLine.appendSwitch("ozone-platform-hint", "auto");
+  }
+
+  console.log(
+    "[Startup] Wayland session detected. Enabled GlobalShortcutsPortal."
+  );
+}
+
+queueCliActions(process.argv);
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+  process.exit(0);
+}
+
 let mainWindow: BrowserWindow | null = null;
 let transcriptionWindow: BrowserWindow | null = null;
 const textImprovementWindows: Map<number, BrowserWindow> = new Map();
 let nextServer: Server | null = null;
 let nextServerUrl: string | null = null;
+
+function dispatchPendingCliActions() {
+  if (!mainWindow) {
+    return;
+  }
+
+  const dispatch = () => {
+    if (pendingCliActions.toggleWhisper) {
+      pendingCliActions.toggleWhisper = false;
+      console.log("[CLI] --toggle-whisper received");
+      mainWindow?.webContents.send("shortcut:toggleWhisper");
+    }
+  };
+
+  // Give renderer a brief moment to attach IPC listeners after page load.
+  if (mainWindow.webContents.isLoadingMainFrame()) {
+    mainWindow.webContents.once("did-finish-load", () => {
+      setTimeout(dispatch, 300);
+    });
+    return;
+  }
+
+  setTimeout(dispatch, 150);
+}
 
 type VolumeBackend = "wpctl" | "pactl";
 
@@ -336,6 +426,7 @@ async function createMainWindow(): Promise<BrowserWindow> {
     },
     autoHideMenuBar: true,
     frame: true,
+    backgroundColor: "#020617",
     alwaysOnTop: true,
     x: screenWidth - windowWidth, // Touch the right edge
     y: Math.floor((screenHeight - windowHeight) / 2), // Center vertically
@@ -381,6 +472,7 @@ app.on("activate", () => {
   if (mainWindow === null) {
     void createMainWindow().then((window) => {
       mainWindow = window;
+      dispatchPendingCliActions();
     });
   }
 });
@@ -406,7 +498,8 @@ async function createTranscriptionWindow(): Promise<BrowserWindow> {
     },
     autoHideMenuBar: true,
     frame: false,
-    transparent: true,
+    transparent: false,
+    backgroundColor: "#020617",
     alwaysOnTop: true,
     resizable: true,
     skipTaskbar: true,
@@ -465,7 +558,8 @@ async function createTextImprovementWindow(initialText?: string): Promise<Browse
     },
     autoHideMenuBar: true,
     frame: false,
-    transparent: true,
+    transparent: false,
+    backgroundColor: "#0a0f14",
     alwaysOnTop: true,
     resizable: true,
     skipTaskbar: true,
@@ -520,8 +614,19 @@ async function createTextImprovementWindow(initialText?: string): Promise<Browse
 // Type assertion for isQuitting flag
 const appWithQuitting = app as typeof app & { isQuitting?: boolean };
 
+app.on("second-instance", (_event, argv) => {
+  queueCliActions(argv);
+
+  if (!mainWindow) {
+    return;
+  }
+
+  dispatchPendingCliActions();
+});
+
 app.on("ready", async () => {
   mainWindow = await createMainWindow();
+  dispatchPendingCliActions();
 
   // Create system tray
   createTray(mainWindow);
@@ -683,27 +788,36 @@ app.on("ready", async () => {
 
   // Register global shortcuts
   // Using Ctrl+Shift for better compatibility across apps
-  globalShortcut.register("CommandOrControl+Shift+T", () => {
+  const transcriptionRegistered = globalShortcut.register("CommandOrControl+Shift+T", () => {
     console.log("[GlobalShortcut] Ctrl+Shift+T pressed - toggle real-time transcription");
     mainWindow?.webContents.send("shortcut:toggleTranscription");
   });
+  console.log("[GlobalShortcut] Ctrl+Shift+T registered:", transcriptionRegistered);
 
-  globalShortcut.register("CommandOrControl+Shift+R", () => {
+  const whisperRegistered = globalShortcut.register("CommandOrControl+Shift+R", () => {
     console.log("[GlobalShortcut] Ctrl+Shift+R pressed - toggle Whisper transcription");
     mainWindow?.webContents.send("shortcut:toggleWhisper");
   });
+  console.log("[GlobalShortcut] Ctrl+Shift+R registered:", whisperRegistered);
 
-  globalShortcut.register("CommandOrControl+Shift+M", () => {
+  const muteRegistered = globalShortcut.register("CommandOrControl+Shift+M", () => {
     console.log("[GlobalShortcut] Ctrl+Shift+M pressed - toggle mute");
     mainWindow?.webContents.send("shortcut:toggleMute");
   });
+  console.log("[GlobalShortcut] Ctrl+Shift+M registered:", muteRegistered);
 
-  globalShortcut.register("CommandOrControl+Shift+G", () => {
+  const textImprovementRegistered = globalShortcut.register("CommandOrControl+Shift+G", () => {
     console.log("[GlobalShortcut] Ctrl+Shift+G pressed - toggle text improvement");
     mainWindow?.webContents.send("shortcut:toggleTextImprovement");
   });
+  console.log("[GlobalShortcut] Ctrl+Shift+G registered:", textImprovementRegistered);
 
-  console.log("[GlobalShortcut] Registered Ctrl+Shift+T, Ctrl+Shift+R and Ctrl+Shift+M");
+  console.log("[GlobalShortcut] Registration summary:", {
+    transcriptionRegistered,
+    whisperRegistered,
+    muteRegistered,
+    textImprovementRegistered,
+  });
 });
 
 app.on("will-quit", async () => {
@@ -1073,6 +1187,132 @@ interface CostLog {
   metadata?: Record<string, unknown>;
 }
 
+const REALTIME_PRICING: Record<string, {
+  audio_input_per_1m: number;
+  audio_cached_input_per_1m: number;
+  audio_output_per_1m: number;
+  text_input_per_1m: number;
+  text_cached_input_per_1m: number;
+  text_output_per_1m: number;
+  image_input_per_1m: number;
+  image_cached_input_per_1m: number;
+}> = {
+  "gpt-realtime-2": {
+    audio_input_per_1m: 32,
+    audio_cached_input_per_1m: 0.4,
+    audio_output_per_1m: 64,
+    text_input_per_1m: 4,
+    text_cached_input_per_1m: 0.4,
+    text_output_per_1m: 24,
+    image_input_per_1m: 5,
+    image_cached_input_per_1m: 0.5,
+  },
+  "gpt-realtime-1.5": {
+    audio_input_per_1m: 32,
+    audio_cached_input_per_1m: 0.4,
+    audio_output_per_1m: 64,
+    text_input_per_1m: 4,
+    text_cached_input_per_1m: 0.4,
+    text_output_per_1m: 16,
+    image_input_per_1m: 5,
+    image_cached_input_per_1m: 0.5,
+  },
+  "gpt-realtime": {
+    audio_input_per_1m: 32,
+    audio_cached_input_per_1m: 0.4,
+    audio_output_per_1m: 64,
+    text_input_per_1m: 4,
+    text_cached_input_per_1m: 0.4,
+    text_output_per_1m: 16,
+    image_input_per_1m: 5,
+    image_cached_input_per_1m: 0.5,
+  },
+};
+
+function readNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function calculateRealtimeLogCost(model: string, usage: Record<string, unknown>) {
+  const prices = REALTIME_PRICING[model];
+  if (!prices) return null;
+
+  const inputDetails = usage.input_token_details as Record<string, unknown> | undefined;
+  const outputDetails = usage.output_token_details as Record<string, unknown> | undefined;
+  if (!inputDetails && !outputDetails) return null;
+
+  let cost = 0;
+
+  if (inputDetails) {
+    const cachedDetails =
+      inputDetails.cached_tokens_details as Record<string, unknown> | undefined;
+    const textTokens = readNumber(inputDetails.text_tokens);
+    const audioTokens = readNumber(inputDetails.audio_tokens);
+    const imageTokens = readNumber(inputDetails.image_tokens);
+    const cachedTextTokens = Math.min(textTokens, readNumber(cachedDetails?.text_tokens));
+    const cachedAudioTokens = Math.min(audioTokens, readNumber(cachedDetails?.audio_tokens));
+    const cachedImageTokens = Math.min(imageTokens, readNumber(cachedDetails?.image_tokens));
+    let remainingCachedTokens = Math.max(
+      0,
+      readNumber(inputDetails.cached_tokens) -
+        cachedTextTokens -
+        cachedAudioTokens -
+        cachedImageTokens
+    );
+
+    const fallbackCachedTextTokens = Math.min(
+      Math.max(0, textTokens - cachedTextTokens),
+      remainingCachedTokens
+    );
+    remainingCachedTokens -= fallbackCachedTextTokens;
+    const fallbackCachedImageTokens = Math.min(
+      Math.max(0, imageTokens - cachedImageTokens),
+      remainingCachedTokens
+    );
+    remainingCachedTokens -= fallbackCachedImageTokens;
+    const fallbackCachedAudioTokens = Math.min(
+      Math.max(0, audioTokens - cachedAudioTokens),
+      remainingCachedTokens
+    );
+
+    const totalCachedTextTokens = cachedTextTokens + fallbackCachedTextTokens;
+    const totalCachedAudioTokens = cachedAudioTokens + fallbackCachedAudioTokens;
+    const totalCachedImageTokens = cachedImageTokens + fallbackCachedImageTokens;
+
+    cost += ((textTokens - totalCachedTextTokens) / 1_000_000) * prices.text_input_per_1m;
+    cost += (totalCachedTextTokens / 1_000_000) * prices.text_cached_input_per_1m;
+    cost += ((audioTokens - totalCachedAudioTokens) / 1_000_000) * prices.audio_input_per_1m;
+    cost += (totalCachedAudioTokens / 1_000_000) * prices.audio_cached_input_per_1m;
+    cost += ((imageTokens - totalCachedImageTokens) / 1_000_000) * prices.image_input_per_1m;
+    cost += (totalCachedImageTokens / 1_000_000) * prices.image_cached_input_per_1m;
+  }
+
+  if (outputDetails) {
+    cost += (readNumber(outputDetails.text_tokens) / 1_000_000) * prices.text_output_per_1m;
+    cost += (readNumber(outputDetails.audio_tokens) / 1_000_000) * prices.audio_output_per_1m;
+  }
+
+  return cost;
+}
+
+function withRecalculatedRealtimeCost(log: CostLog): CostLog {
+  if (!log.model.startsWith("gpt-realtime")) return log;
+  const usage = log.metadata;
+  if (!usage) return log;
+  const recalculatedCost = calculateRealtimeLogCost(log.model, usage);
+  if (recalculatedCost === null || Math.abs(recalculatedCost - log.cost) < 1e-12) {
+    return log;
+  }
+  return {
+    ...log,
+    cost: recalculatedCost,
+    metadata: {
+      ...usage,
+      local_cost_recalculated: true,
+    },
+  };
+}
+
 ipcMain.handle("costTracker:addLog", async (_, log: Omit<CostLog, "id" | "timestamp"> & { timestamp?: string }) => {
   try {
     let logs: CostLog[] = [];
@@ -1086,9 +1326,10 @@ ipcMain.handle("costTracker:addLog", async (_, log: Omit<CostLog, "id" | "timest
       timestamp: log.timestamp || new Date().toISOString(),
     };
 
-    logs.push(entry);
+    const pricedEntry = withRecalculatedRealtimeCost(entry);
+    logs.push(pricedEntry);
     fs.writeFileSync(COST_LOGS_FILE, JSON.stringify(logs, null, 2), "utf-8");
-    console.log("[CostTracker] Added log:", entry.model, entry.cost);
+    console.log("[CostTracker] Added log:", pricedEntry.model, pricedEntry.cost);
     return { success: true, id: entry.id };
   } catch (error) {
     console.error("[CostTracker] Failed to add log:", error);
@@ -1102,7 +1343,17 @@ ipcMain.handle("costTracker:getLogs", async (_, period?: 'day' | 'week' | 'month
       return { success: true, logs: [], totalCost: 0, byModel: {} };
     }
 
-    let logs: CostLog[] = JSON.parse(fs.readFileSync(COST_LOGS_FILE, "utf-8"));
+    let allLogs: CostLog[] = JSON.parse(fs.readFileSync(COST_LOGS_FILE, "utf-8"));
+    const recalculatedLogs = allLogs.map(withRecalculatedRealtimeCost);
+    if (
+      recalculatedLogs.some((log, index) => log.cost !== allLogs[index]?.cost)
+    ) {
+      allLogs = recalculatedLogs;
+      fs.writeFileSync(COST_LOGS_FILE, JSON.stringify(allLogs, null, 2), "utf-8");
+      console.log("[CostTracker] Recalculated realtime cost logs with cached-token pricing");
+    }
+
+    let logs = allLogs;
 
     // Filter by period if specified
     if (period && period !== 'all') {

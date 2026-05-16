@@ -17,8 +17,8 @@ A cross-platform voice assistant application using OpenAI's Realtime API with We
 - **Configurable Sensitivity**: Adjustable detection threshold
 
 ### Transcription Modes
-- **Real-time Transcription (Ctrl+Shift+T)**: Live speech-to-text using OpenAI's real-time transcription with local VAD
-- **Whisper Transcription (Ctrl+Shift+R)**: Higher quality transcription - records audio then transcribes via Whisper API
+- **Live Realtime Transcription (Ctrl+Shift+T)**: Streaming speech-to-text using `gpt-realtime-whisper` and server VAD
+- **HQ Transcription (Ctrl+Shift+R)**: Higher quality transcription - records audio then transcribes with `gpt-4o-transcribe`
 - **Text Improvement (Ctrl+Shift+G)**: Capture speech and improve/reformat text using AI
 - **Floating Overlay Windows**: Transcription appears in draggable, always-on-top windows
 
@@ -138,7 +138,7 @@ Output files are created in the `dist/` directory.
 | Shortcut | Action |
 |----------|--------|
 | Ctrl+Shift+T | Toggle real-time transcription |
-| Ctrl+Shift+R | Toggle Whisper transcription |
+| Ctrl+Shift+R | Toggle HQ transcription |
 | Ctrl+Shift+M | Mute/unmute microphone |
 | Ctrl+Shift+G | Open text improvement window |
 
@@ -154,7 +154,7 @@ hooks/
   use-webrtc.ts    # Core WebRTC connection and audio streaming
   use-wake-word.ts # Picovoice wake word detection
   use-tools.ts     # Tool function implementations
-  use-transcription.ts # Whisper transcription hook
+  use-transcription.ts # HQ transcription hook
 lib/
   tools.ts         # Tool definitions for the Realtime API
   conversation-memory.ts # Memory and context persistence

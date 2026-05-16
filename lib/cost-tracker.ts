@@ -27,14 +27,38 @@ function isElectronCostTracker(): boolean {
          typeof window.electron?.costTracker?.addLog === 'function';
 }
 
-// Pricing based on Jan 2026 data
+// Pricing based on OpenAI docs checked May 2026.
 export const PRICING = {
   // OpenAI Realtime API
+  'gpt-realtime-2': {
+    audio_input_per_1m: 32.0,
+    audio_cached_input_per_1m: 0.40,
+    audio_output_per_1m: 64.0,
+    text_input_per_1m: 4.0,
+    text_cached_input_per_1m: 0.40,
+    text_output_per_1m: 24.0,
+    image_input_per_1m: 5.0,
+    image_cached_input_per_1m: 0.50,
+  },
+  'gpt-realtime-1.5': {
+    audio_input_per_1m: 32.0,
+    audio_cached_input_per_1m: 0.40,
+    audio_output_per_1m: 64.0,
+    text_input_per_1m: 4.0,
+    text_cached_input_per_1m: 0.40,
+    text_output_per_1m: 16.0,
+    image_input_per_1m: 5.0,
+    image_cached_input_per_1m: 0.50,
+  },
   'gpt-realtime': {
-    audio_input_per_1m: 100.0,
-    audio_output_per_1m: 200.0,
-    text_input_per_1m: 5.0,
-    text_output_per_1m: 20.0,
+    audio_input_per_1m: 32.0,
+    audio_cached_input_per_1m: 0.40,
+    audio_output_per_1m: 64.0,
+    text_input_per_1m: 4.0,
+    text_cached_input_per_1m: 0.40,
+    text_output_per_1m: 16.0,
+    image_input_per_1m: 5.0,
+    image_cached_input_per_1m: 0.50,
   },
   // OpenAI Chat
   'gpt-5.1-chat-latest': {
@@ -48,6 +72,12 @@ export const PRICING = {
     output_per_1m: 15.00,
   },
   // Transcription
+  'gpt-realtime-whisper': {
+    per_minute: 0.017,
+  },
+  'gpt-4o-transcribe': {
+    per_minute: 0.006,
+  },
   'whisper-1': {
     per_minute: 0.006,
   },
@@ -187,7 +217,7 @@ export async function getCostStats(
     const request = range ? index.getAll(range) : index.getAll();
 
     request.onsuccess = () => {
-      const logs = request.result as CostLog[];
+      const logs = (request.result as CostLog[]).map(withRecalculatedRealtimeCost);
       const stats = logs.reduce((acc, log) => {
         acc.totalCost += log.cost;
         acc.byModel[log.model] = (acc.byModel[log.model] || 0) + log.cost;
@@ -250,25 +280,92 @@ export async function clearCostLogs(): Promise<void> {
   }
 }
 
-interface RealtimeUsage {
-  input_token_details?: { text_tokens?: number; audio_tokens?: number };
-  output_token_details?: { text_tokens?: number; audio_tokens?: number };
+type RealtimeModel = 'gpt-realtime-2' | 'gpt-realtime-1.5' | 'gpt-realtime';
+
+interface RealtimeUsageDetails {
+  text_tokens?: number;
+  audio_tokens?: number;
+  image_tokens?: number;
+  cached_tokens?: number;
+  cached_tokens_details?: {
+    text_tokens?: number;
+    audio_tokens?: number;
+    image_tokens?: number;
+  };
 }
 
-export function calculateRealtimeCost(usage: RealtimeUsage): number {
-    const model = 'gpt-realtime';
+interface RealtimeUsage {
+  input_token_details?: RealtimeUsageDetails;
+  output_token_details?: {
+    text_tokens?: number;
+    audio_tokens?: number;
+  };
+}
+
+export function calculateRealtimeCost(
+    usage: RealtimeUsage,
+    model: RealtimeModel = 'gpt-realtime-2'
+): number {
     const prices = PRICING[model];
     
     let cost = 0;
-    
-    // Input Text
-    if (usage.input_token_details?.text_tokens) {
-        cost += (usage.input_token_details.text_tokens / 1_000_000) * prices.text_input_per_1m;
-    }
-    
-    // Input Audio
-    if (usage.input_token_details?.audio_tokens) {
-        cost += (usage.input_token_details.audio_tokens / 1_000_000) * prices.audio_input_per_1m;
+
+    const inputDetails = usage.input_token_details;
+    if (inputDetails) {
+        const cachedDetails = inputDetails.cached_tokens_details;
+        const cachedTextTokens = Math.min(
+            inputDetails.text_tokens || 0,
+            cachedDetails?.text_tokens || 0
+        );
+        const cachedAudioTokens = Math.min(
+            inputDetails.audio_tokens || 0,
+            cachedDetails?.audio_tokens || 0
+        );
+        const cachedImageTokens = Math.min(
+            inputDetails.image_tokens || 0,
+            cachedDetails?.image_tokens || 0
+        );
+
+        const unallocatedCachedTokens = Math.max(
+            0,
+            (inputDetails.cached_tokens || 0) -
+                cachedTextTokens -
+                cachedAudioTokens -
+                cachedImageTokens
+        );
+
+        // If the API only returns aggregate cached_tokens, conservatively assign
+        // the remaining cached portion to the cheapest eligible modality first.
+        let remainingCachedTokens = unallocatedCachedTokens;
+        const fallbackCachedTextTokens = Math.min(
+            Math.max(0, (inputDetails.text_tokens || 0) - cachedTextTokens),
+            remainingCachedTokens
+        );
+        remainingCachedTokens -= fallbackCachedTextTokens;
+        const fallbackCachedImageTokens = Math.min(
+            Math.max(0, (inputDetails.image_tokens || 0) - cachedImageTokens),
+            remainingCachedTokens
+        );
+        remainingCachedTokens -= fallbackCachedImageTokens;
+        const fallbackCachedAudioTokens = Math.min(
+            Math.max(0, (inputDetails.audio_tokens || 0) - cachedAudioTokens),
+            remainingCachedTokens
+        );
+
+        const totalCachedTextTokens = cachedTextTokens + fallbackCachedTextTokens;
+        const totalCachedAudioTokens = cachedAudioTokens + fallbackCachedAudioTokens;
+        const totalCachedImageTokens = cachedImageTokens + fallbackCachedImageTokens;
+
+        const nonCachedTextTokens = Math.max(0, (inputDetails.text_tokens || 0) - totalCachedTextTokens);
+        const nonCachedAudioTokens = Math.max(0, (inputDetails.audio_tokens || 0) - totalCachedAudioTokens);
+        const nonCachedImageTokens = Math.max(0, (inputDetails.image_tokens || 0) - totalCachedImageTokens);
+
+        cost += (nonCachedTextTokens / 1_000_000) * prices.text_input_per_1m;
+        cost += (totalCachedTextTokens / 1_000_000) * prices.text_cached_input_per_1m;
+        cost += (nonCachedAudioTokens / 1_000_000) * prices.audio_input_per_1m;
+        cost += (totalCachedAudioTokens / 1_000_000) * prices.audio_cached_input_per_1m;
+        cost += (nonCachedImageTokens / 1_000_000) * prices.image_input_per_1m;
+        cost += (totalCachedImageTokens / 1_000_000) * prices.image_cached_input_per_1m;
     }
     
     // Output Text
@@ -282,6 +379,26 @@ export function calculateRealtimeCost(usage: RealtimeUsage): number {
     }
     
     return cost;
+}
+
+function isRealtimeModel(model: string): model is RealtimeModel {
+    return model === 'gpt-realtime-2' ||
+        model === 'gpt-realtime-1.5' ||
+        model === 'gpt-realtime';
+}
+
+function withRecalculatedRealtimeCost(log: CostLog): CostLog {
+    if (!isRealtimeModel(log.model) || !log.metadata) return log;
+    const cost = calculateRealtimeCost(log.metadata as RealtimeUsage, log.model);
+    if (Math.abs(cost - log.cost) < 1e-12) return log;
+    return {
+        ...log,
+        cost,
+        metadata: {
+            ...log.metadata,
+            local_cost_recalculated: true,
+        },
+    };
 }
 
 export function calculateChatCost(model: 'gpt-5.1-chat-latest' | 'claude-sonnet-4-20250514', usage: { prompt_tokens: number, completion_tokens: number, prompt_tokens_details?: { cached_tokens?: number } }): number {

@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { playSound } from "@/lib/tools";
 import { addCostLog, PRICING } from "@/lib/cost-tracker";
+import { OPENAI_FILE_TRANSCRIPTION_MODEL } from "@/lib/openai-models";
 import { TRANSCRIPTION_STYLE_HINT } from "@/lib/text-improvement-prompts";
 import {
   savePendingTranscription,
@@ -339,9 +340,9 @@ export default function useTranscription(
         if (result) {
           // Log cost
           const minutes = duration / 60;
-          const cost = minutes * PRICING['whisper-1'].per_minute;
+          const cost = minutes * PRICING[OPENAI_FILE_TRANSCRIPTION_MODEL].per_minute;
           addCostLog({
-              model: 'whisper-1',
+              model: OPENAI_FILE_TRANSCRIPTION_MODEL,
               type: 'transcription',
               seconds: duration,
               cost,

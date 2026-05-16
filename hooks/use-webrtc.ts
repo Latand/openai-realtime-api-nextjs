@@ -6,6 +6,12 @@ import { Conversation } from "@/lib/conversations";
 import { useTranslations } from "@/components/translations-context";
 import { playSound } from "@/lib/tools";
 import { addCostLog, calculateRealtimeCost } from "@/lib/cost-tracker";
+import {
+  OPENAI_REALTIME_TRANSCRIPTION_MODEL,
+  OPENAI_REALTIME_VOICE_MODEL,
+  REALTIME_2_INSTRUCTION_APPENDIX,
+  REALTIME_VOICE_TURN_DETECTION,
+} from "@/lib/openai-models";
 
 declare global {
   interface Window {
@@ -193,6 +199,7 @@ export default function useWebRTCAudioSession(
    * While user is speaking, we update that conversation item by ID.
    */
   const ephemeralUserMessageIdRef = useRef<string | null>(null);
+  const ephemeralUserTranscriptRef = useRef("");
 
   /**
    * Register a function (tool) so the AI can call it.
@@ -216,20 +223,22 @@ export default function useWebRTCAudioSession(
       console.log("[Memory] Injecting previous conversations into instructions, length:", previousConversations.length);
       instructions += previousConversations;
     }
+    instructions += REALTIME_2_INSTRUCTION_APPENDIX;
 
     const sessionUpdate = {
       type: "session.update",
       session: {
-        modalities: ["text", "audio"],
+        type: "realtime",
+        output_modalities: ["audio"],
         tools: allTools,
-        input_audio_transcription: {
-          model: "whisper-1",
-        },
-        turn_detection: {
-          type: "server_vad",
-          threshold: 0.9, // Higher = less sensitive (0.0-1.0), default is ~0.5
-          prefix_padding_ms: 500,
-          silence_duration_ms: 1500,
+        tool_choice: "auto",
+        audio: {
+          input: {
+            transcription: {
+              model: OPENAI_REALTIME_TRANSCRIPTION_MODEL,
+            },
+            turn_detection: REALTIME_VOICE_TURN_DETECTION,
+          },
         },
         instructions,
       },
@@ -255,6 +264,7 @@ export default function useWebRTCAudioSession(
     if (!ephemeralId) {
       ephemeralId = uuidv4();
       ephemeralUserMessageIdRef.current = ephemeralId;
+      ephemeralUserTranscriptRef.current = "";
       const newMessage: Conversation = {
         id: ephemeralId,
         role: "user",
@@ -284,6 +294,7 @@ export default function useWebRTCAudioSession(
    */
   function clearEphemeralUserMessage() {
     ephemeralUserMessageIdRef.current = null;
+    ephemeralUserTranscriptRef.current = "";
   }
 
   /**
@@ -333,6 +344,7 @@ export default function useWebRTCAudioSession(
         case "conversation.item.input_audio_transcription": {
           const partialText =
             msg.transcript ?? msg.text ?? "User is speaking...";
+          ephemeralUserTranscriptRef.current = partialText;
           updateEphemeralUserMessage({
             text: partialText,
             status: "speaking",
@@ -340,16 +352,27 @@ export default function useWebRTCAudioSession(
           });
           break;
         }
+        case "conversation.item.input_audio_transcription.delta": {
+          getOrCreateEphemeralUserId();
+          ephemeralUserTranscriptRef.current += msg.delta || "";
+          updateEphemeralUserMessage({
+            text: ephemeralUserTranscriptRef.current || "User is speaking...",
+            status: "speaking",
+            isFinal: false,
+          });
+          break;
+        }
         case "conversation.item.input_audio_transcription.completed": {
           updateEphemeralUserMessage({
-            text: msg.transcript || "",
+            text: msg.transcript || ephemeralUserTranscriptRef.current || "",
             isFinal: true,
             status: "final",
           });
           clearEphemeralUserMessage();
           break;
         }
-        case "response.audio_transcript.delta": {
+        case "response.audio_transcript.delta":
+        case "response.output_audio_transcript.delta": {
           const newMessage: Conversation = {
             id: uuidv4(),
             role: "assistant",
@@ -372,7 +395,8 @@ export default function useWebRTCAudioSession(
           });
           break;
         }
-        case "response.audio_transcript.done": {
+        case "response.audio_transcript.done":
+        case "response.output_audio_transcript.done": {
           setConversation((prev) => {
             if (prev.length === 0) return prev;
             const updated = [...prev];
@@ -389,9 +413,9 @@ export default function useWebRTCAudioSession(
         case "response.done": {
           const usage = msg.response?.usage;
           if (usage) {
-            const cost = calculateRealtimeCost(usage);
+            const cost = calculateRealtimeCost(usage, OPENAI_REALTIME_VOICE_MODEL);
             addCostLog({
-              model: "gpt-realtime",
+              model: OPENAI_REALTIME_VOICE_MODEL,
               type: "unknown", 
               tokens: usage.total_tokens,
               cost,
@@ -559,7 +583,7 @@ export default function useWebRTCAudioSession(
         throw new Error(`Failed to get ephemeral token: ${response.status}`);
       }
       const data = await response.json();
-      return data.client_secret.value;
+      return data.value || data.client_secret?.value;
     } catch (err) {
       console.error("getEphemeralToken error:", err);
       throw err;
@@ -721,9 +745,7 @@ export default function useWebRTCAudioSession(
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      const baseUrl = "https://api.openai.com/v1/realtime";
-      const model = "gpt-realtime";
-      const response = await fetch(`${baseUrl}?model=${model}&voice=${voice}`, {
+      const response = await fetch("https://api.openai.com/v1/realtime/calls", {
         method: "POST",
         body: offer.sdp,
         headers: {

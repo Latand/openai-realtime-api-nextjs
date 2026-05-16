@@ -2,13 +2,24 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
-import { Wand2, X, Square, Trash2, Copy, RotateCcw, CircleX } from "lucide-react";
+import {
+  Activity,
+  Check,
+  CircleX,
+  Copy,
+  Loader2,
+  RotateCcw,
+  Square,
+  Trash2,
+  Wand2,
+  X,
+} from "lucide-react";
 
 export default function TranscriptionPage() {
-  // Override body background for transparent window
+  // Keep Linux compositors from rendering transparent-window artifacts.
   useEffect(() => {
-    document.body.style.background = "transparent";
-    document.documentElement.style.background = "transparent";
+    document.body.style.background = "#020617";
+    document.documentElement.style.background = "#020617";
     return () => {
       document.body.style.background = "";
       document.documentElement.style.background = "";
@@ -193,8 +204,8 @@ export default function TranscriptionPage() {
 
   // Close window
   const handleClose = useCallback(async () => {
-    // If Whisper is currently recording and user closes the window, cancel the recording
-    // (stop without transcribing). Safe no-op when not recording Whisper.
+    // If HQ mode is currently recording and user closes the window, cancel the recording
+    // (stop without transcribing). Safe no-op when not recording HQ mode.
     if (isRecording && !isProcessing && window.electron?.transcription?.cancelWhisper) {
       try {
         await window.electron.transcription.cancelWhisper();
@@ -210,7 +221,7 @@ export default function TranscriptionPage() {
     await window.electron?.transcription?.stop?.();
   }, []);
 
-  const isWhisperUi = interim.toLowerCase().includes("whisper");
+  const isHqUi = /hq|whisper/i.test(interim);
 
   const handleCancel = useCallback(async () => {
     try {
@@ -310,72 +321,93 @@ export default function TranscriptionPage() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const statusLabel = isProcessing
+    ? "Processing"
+    : isRecording
+    ? `Recording ${formatDuration(recordingDuration)}`
+    : isListening
+    ? `Live ${recordingDuration > 0 ? formatDuration(recordingDuration) : ""}`.trim()
+    : hasText
+    ? "Ready"
+    : "Idle";
+  const modeLabel = isProcessing || isRecording || isHqUi ? "HQ Transcribe" : "Live Realtime";
+  const hintLabel = isProcessing
+    ? "Converting captured audio"
+    : isRecording
+    ? "Press stop to transcribe"
+    : isListening
+    ? "Streaming transcript deltas"
+    : hasText
+    ? "Review, improve, copy"
+    : "Waiting for speech";
+  const statusClass = isProcessing
+    ? "bg-amber-400 text-slate-950"
+    : isRecording
+    ? "bg-rose-500 text-white"
+    : isListening
+    ? "bg-emerald-400 text-slate-950"
+    : hasText
+    ? "bg-sky-400 text-slate-950"
+    : "bg-slate-600 text-slate-200";
+
   return (
     <main
       className="fixed inset-0 select-none overflow-hidden m-0 p-2"
-      style={{ background: "transparent" } as React.CSSProperties}
+      style={{ background: "#020617" } as React.CSSProperties}
     >
-      <div
-        className="h-full w-full flex flex-col bg-gradient-to-br from-slate-900/95 to-slate-800/95 rounded-2xl border border-slate-600/50 shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden backdrop-blur-xl"
-      >
+      <div className="h-full w-full flex flex-col overflow-hidden rounded-xl border border-slate-500/45 bg-slate-950/94 shadow-[0_18px_42px_rgba(2,6,23,0.55)] backdrop-blur-xl">
         {/* Header - draggable */}
         <div
-          className="flex items-center justify-between px-4 py-2.5 bg-slate-800/50 border-b border-slate-700/50 cursor-move"
+          className="flex cursor-move items-center justify-between border-b border-slate-700/70 bg-slate-900/85 px-3.5 py-2.5"
           onMouseDown={handleDragStart}
         >
-          <div className="flex items-center gap-2.5">
-            <div className="relative flex items-center justify-center">
-              {/* Dot logic:
-                  - If processing: Orange + Blink
-                  - If recording: Red + Blink
-                  - If listening: Green + Blink
-                  - If idle: Grey + No Blink
-              */}
-              <div
-                className={`w-2.5 h-2.5 rounded-full transition-colors duration-300
-                  ${isProcessing ? 'bg-orange-500' : isRecording ? 'bg-red-500' : isListening ? 'bg-emerald-500' : 'bg-slate-500'}
-                `}
-              />
+          <div className="min-w-0 flex items-center gap-3">
+            <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-900">
+              <Activity className="h-4 w-4 text-slate-300" />
               {(isRecording || isProcessing || isListening) && (
                 <div
-                  className={`absolute w-2.5 h-2.5 rounded-full animate-ping opacity-75
-                    ${isProcessing ? 'bg-orange-500' : isRecording ? 'bg-red-500' : 'bg-emerald-500'}
-                  `}
+                  className={`absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full ${statusClass}`}
                 />
               )}
             </div>
-            <span className="text-sm font-medium text-slate-300">
-              {isProcessing ? 'Processing...' : isRecording ? `Recording ${formatDuration(recordingDuration)}` : isListening ? 'Listening...' : 'Paused'}
-            </span>
+            <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-sm font-semibold text-slate-100">{modeLabel}</span>
+                <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${statusClass}`}>
+                  {statusLabel}
+                </span>
+              </div>
+              <div className="truncate text-[11px] text-slate-400">{hintLabel}</div>
+            </div>
           </div>
 
           <div className="flex items-center gap-1">
             {/* Show Stop button only if listening/recording/processing */}
             {(isListening || isRecording || isProcessing) && (
-                <button
+              <button
                 onClick={handleStop}
-                className="p-1.5 hover:bg-red-500/20 rounded-lg transition-colors group"
+                className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-1.5 text-rose-300 transition-colors hover:bg-rose-500/20"
                 title="Stop Recording"
-                >
-                <Square className="w-3.5 h-3.5 text-red-400 fill-current" />
-                </button>
+              >
+                <Square className="h-3.5 w-3.5 fill-current" />
+              </button>
             )}
-            {/* Whisper-only cancel: stop without transcribing */}
-            {isWhisperUi && isRecording && !isProcessing && !isListening && (
+            {/* HQ-only cancel: stop without transcribing */}
+            {isHqUi && isRecording && !isProcessing && !isListening && (
               <button
                 onClick={handleCancel}
-                className="p-1.5 hover:bg-slate-700/80 rounded-lg transition-colors group"
+                className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100"
                 title="Cancel (do not transcribe)"
               >
-                <CircleX className="w-4 h-4 text-slate-400 group-hover:text-slate-200" />
+                <CircleX className="h-4 w-4" />
               </button>
             )}
             <button
               onClick={handleClose}
-              className="p-1.5 hover:bg-slate-700/80 rounded-lg transition-colors group"
+              className="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-100"
               title="Close"
             >
-              <X className="w-4 h-4 text-slate-500 group-hover:text-slate-300" />
+              <X className="h-4 w-4" />
             </button>
           </div>
         </div>
@@ -383,46 +415,42 @@ export default function TranscriptionPage() {
         {/* Text area */}
         <div
           ref={textRef}
-          className="flex-1 p-4 overflow-y-auto"
+          className="flex-1 overflow-y-auto px-4 py-3.5"
         >
           {isProcessing ? (
-            <div className="h-full flex flex-col items-center justify-center gap-4">
-              <div className="flex items-center gap-3">
-                <svg className="w-5 h-5 text-orange-400 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                <p className="text-slate-300 text-base">Processing with Whisper...</p>
+            <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
+              <div className="flex items-center gap-3 text-slate-200">
+                <Loader2 className="h-5 w-5 animate-spin text-amber-300" />
+                <p className="text-base font-medium">Processing with GPT-4o Transcribe</p>
               </div>
 
               {/* Progress bar */}
               <div className="w-full max-w-xs">
-                <div className="flex justify-between text-xs text-slate-500 mb-1.5">
+                <div className="mb-1.5 flex justify-between text-xs text-slate-500">
                   <span>Processing</span>
                   <span>{Math.round(progress)}%</span>
                 </div>
-                <div className="h-2 bg-slate-700/50 rounded-full overflow-hidden">
+                <div className="h-2 overflow-hidden rounded-full bg-slate-800">
                   <div
-                    className="h-full bg-gradient-to-r from-orange-500 to-amber-400 rounded-full transition-all duration-100 ease-out"
+                    className="h-full rounded-full bg-amber-300 transition-all duration-100 ease-out"
                     style={{
                       width: `${progress}%`,
-                      boxShadow: progress > 0 ? '0 0 10px rgba(251, 146, 60, 0.5)' : 'none'
                     }}
                   />
                 </div>
                 {recordingDuration > 0 && (
-                  <p className="text-xs text-slate-500 mt-1.5 text-center">
+                  <p className="mt-1.5 text-center text-xs text-slate-500">
                     ~{Math.max(1, Math.ceil((recordingDuration / 12.5) * (1 - progress / 100)))}s remaining
                   </p>
                 )}
               </div>
             </div>
           ) : displayText ? (
-            <p className="text-slate-100 text-base leading-relaxed whitespace-pre-wrap">
+            <p className="whitespace-pre-wrap text-base leading-relaxed text-slate-100">
               {newTextStart !== null && newTextStart < displayText.length ? (
                 <>
                   {displayText.slice(0, newTextStart)}
-                  <span className="text-emerald-400 bg-emerald-500/10 rounded px-0.5 transition-all duration-500">
+                  <span className="rounded bg-emerald-400/12 px-0.5 text-emerald-200 transition-all duration-500">
                     {displayText.slice(newTextStart)}
                   </span>
                 </>
@@ -430,12 +458,12 @@ export default function TranscriptionPage() {
                 displayText
               )}
               {interim && (
-                <span className="text-purple-400/80 italic"> {interim}</span>
+                <span className="text-sky-300/80"> {interim}</span>
               )}
             </p>
           ) : (
-            <div className="h-full flex items-center justify-center">
-              <p className="text-slate-500 text-base italic">
+            <div className="flex h-full items-center justify-center text-center">
+              <p className="max-w-[28ch] text-base text-slate-500">
                 {interim || "Start speaking..."}
               </p>
             </div>
@@ -443,7 +471,7 @@ export default function TranscriptionPage() {
         </div>
 
         {/* Actions */}
-        <div className="flex items-center gap-2 px-3 py-2.5 bg-slate-800/60 border-t border-slate-700/50">
+        <div className="flex items-center gap-2 border-t border-slate-700/70 bg-slate-900/88 px-3 py-2.5">
           {/* Magic Wand Improve Button */}
           {hasText && (
             <button
@@ -451,8 +479,8 @@ export default function TranscriptionPage() {
               disabled={isImproving}
               className={`p-2 rounded-lg transition-all border ${
                 isImproving 
-                  ? "bg-purple-500/20 text-purple-400 cursor-wait animate-pulse border-purple-500/30" 
-                  : "bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 hover:text-purple-300 border-purple-500/30"
+                  ? "cursor-wait animate-pulse border-amber-400/30 bg-amber-400/12 text-amber-300"
+                  : "border-amber-400/25 bg-amber-400/10 text-amber-300 hover:bg-amber-400/18 hover:text-amber-200"
               }`}
               title="Instant Improve (Magic Wand)"
             >
@@ -463,8 +491,8 @@ export default function TranscriptionPage() {
           <button
             onClick={handleRetry}
             disabled={!canRetry}
-            className="p-2 text-slate-400 bg-slate-700/40 hover:bg-slate-700/70 hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-all"
-            title="Retry last Whisper audio"
+            className="rounded-lg bg-slate-800/80 p-2 text-slate-400 transition-all hover:bg-slate-700 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+            title="Retry last HQ audio"
           >
             <RotateCcw className="w-4 h-4" />
           </button>
@@ -472,7 +500,7 @@ export default function TranscriptionPage() {
           <button
             onClick={handleClear}
             disabled={!hasText}
-            className="p-2 text-slate-400 bg-slate-700/40 hover:bg-slate-700/70 hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-all"
+            className="rounded-lg bg-slate-800/80 p-2 text-slate-400 transition-all hover:bg-slate-700 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
             title="Clear"
           >
             <Trash2 className="w-4 h-4" />
@@ -481,7 +509,7 @@ export default function TranscriptionPage() {
           <button
             onClick={handleCopy}
             disabled={!hasText}
-            className="flex-1 px-3 py-2 text-sm font-medium text-slate-300 bg-slate-700/40 hover:bg-slate-700/70 hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-all flex items-center justify-center gap-2"
+            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-slate-800/80 px-3 py-2 text-sm font-medium text-slate-300 transition-all hover:bg-slate-700 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Copy className="w-3.5 h-3.5" />
             Copy
@@ -490,8 +518,9 @@ export default function TranscriptionPage() {
           <button
             onClick={handleCopyAndClose}
             disabled={!hasText}
-            className="flex-1 px-3 py-2 text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-all shadow-lg shadow-purple-500/20"
+            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-slate-950 transition-all hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
           >
+            <Check className="h-3.5 w-3.5" />
             Copy & Close
           </button>
         </div>

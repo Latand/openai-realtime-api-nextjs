@@ -2,6 +2,27 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { playSound } from "@/lib/tools";
+import { addCostLog, PRICING } from "@/lib/cost-tracker";
+import {
+  OPENAI_REALTIME_TRANSCRIPTION_MODEL,
+} from "@/lib/openai-models";
+
+const REALTIME_WHISPER_COMMIT_INTERVAL_MS = 1200;
+const REALTIME_WHISPER_MIN_COMMIT_GAP_MS = 800;
+
+function isIgnorableCommitError(apiError?: { code?: string; message?: string }) {
+  const code = (apiError?.code || "").toLowerCase();
+  const message = (apiError?.message || "").toLowerCase();
+  const mentionsInputBuffer =
+    code.includes("input_audio_buffer") || message.includes("audio buffer");
+  return (
+    mentionsInputBuffer &&
+    (message.includes("empty") ||
+      message.includes("too small") ||
+      message.includes("no audio") ||
+      message.includes("minimum"))
+  );
+}
 
 interface UseRealtimeTranscriptionReturn {
   isActive: boolean;
@@ -10,6 +31,7 @@ interface UseRealtimeTranscriptionReturn {
   interimTranscription: string;
   error: string | null;
   currentVolume: number;
+  recordingDuration: number;
   start: () => Promise<void>;
   stop: () => void;
   stopAndGetText: () => Promise<string>;
@@ -29,6 +51,7 @@ export default function useRealtimeTranscription(
   const [interimTranscription, setInterimTranscription] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [currentVolume, setCurrentVolume] = useState(0);
+  const [recordingDuration, setRecordingDuration] = useState(0);
 
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
@@ -36,6 +59,12 @@ export default function useRealtimeTranscription(
   const isStoppingRef = useRef(false);
   const transcriptionRef = useRef<string>("");
   const interimRef = useRef<string>("");
+  const transcriptDeltasRef = useRef<Record<string, string>>({});
+  const startedAtRef = useRef<number | null>(null);
+  const durationIntervalRef = useRef<number | null>(null);
+  const lastLoggedDurationRef = useRef(0);
+  const commitIntervalRef = useRef<number | null>(null);
+  const lastCommitAtRef = useRef(0);
   
   // Volume analysis
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -54,11 +83,12 @@ export default function useRealtimeTranscription(
   // Sync state with overlay window
   useEffect(() => {
     window.electron?.transcription?.updateState?.({
-      isRecording: isActive,
-      isProcessing: false, // Realtime is always "recording" until stopped, no post-processing phase like Whisper
-      recordingDuration: 0 // We don't track duration for Realtime same way as Whisper
+      isListening: isConnecting || isActive,
+      isRecording: false,
+      isProcessing: false,
+      recordingDuration,
     });
-  }, [isActive]);
+  }, [isActive, isConnecting, recordingDuration]);
 
   /**
    * Fetch ephemeral token from the session endpoint
@@ -73,14 +103,44 @@ export default function useRealtimeTranscription(
     const response = await fetch("/api/session", {
       method: "POST",
       headers,
-      body: JSON.stringify({ voice: "alloy" }), // Voice doesn't matter for transcription
+      body: JSON.stringify({ mode: "transcription" }),
     });
     if (!response.ok) {
-      throw new Error(`Failed to get ephemeral token: ${response.status}`);
+      const details = await response.json().catch(() => null);
+      throw new Error(details?.details || details?.error || `Failed to get ephemeral token: ${response.status}`);
     }
     const data = await response.json();
-    return data.client_secret.value;
+    return data.value || data.client_secret?.value;
   }, []);
+
+  const commitAudioBuffer = useCallback((reason: string, force = false) => {
+    const dataChannel = dataChannelRef.current;
+    if (!dataChannel || dataChannel.readyState !== "open") return false;
+
+    const now = Date.now();
+    if (!force && now - lastCommitAtRef.current < REALTIME_WHISPER_MIN_COMMIT_GAP_MS) {
+      return false;
+    }
+
+    dataChannel.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
+    lastCommitAtRef.current = now;
+    console.log("[RealtimeTranscription] Audio commit sent:", reason);
+    return true;
+  }, []);
+
+  const stopCommitLoop = useCallback(() => {
+    if (commitIntervalRef.current) {
+      clearInterval(commitIntervalRef.current);
+      commitIntervalRef.current = null;
+    }
+  }, []);
+
+  const startCommitLoop = useCallback(() => {
+    stopCommitLoop();
+    commitIntervalRef.current = window.setInterval(() => {
+      commitAudioBuffer("periodic");
+    }, REALTIME_WHISPER_COMMIT_INTERVAL_MS);
+  }, [commitAudioBuffer, stopCommitLoop]);
 
   /**
    * Handle messages from the data channel
@@ -97,6 +157,8 @@ export default function useRealtimeTranscription(
       switch (msg.type) {
         case "session.created":
         case "session.updated":
+        case "transcription_session.created":
+        case "transcription_session.updated":
           console.log("[RealtimeTranscription] Session ready");
           break;
 
@@ -110,18 +172,33 @@ export default function useRealtimeTranscription(
           setInterimTranscription("Processing...");
           break;
 
-        case "conversation.item.input_audio_transcription.completed":
+        case "input_audio_buffer.committed":
+          console.log("[RealtimeTranscription] Audio committed:", msg.item_id);
+          break;
+
+        case "conversation.item.input_audio_transcription.delta": {
+          const itemId = msg.item_id || "current";
+          const next = `${transcriptDeltasRef.current[itemId] || ""}${msg.delta || ""}`;
+          transcriptDeltasRef.current[itemId] = next;
+          setInterimTranscription(next || "Transcribing...");
+          break;
+        }
+
+        case "conversation.item.input_audio_transcription.completed": {
           // Final transcription for this segment
-          const transcript = msg.transcript || "";
+          const itemId = msg.item_id || "current";
+          const transcript = (msg.transcript || transcriptDeltasRef.current[itemId] || "").trim();
           console.log("[RealtimeTranscription] Transcription completed:", transcript);
-          if (transcript.trim()) {
+          if (transcript) {
             setTranscription((prev) => {
               const separator = prev ? " " : "";
-              return prev + separator + transcript.trim();
+              return prev + separator + transcript;
             });
           }
+          delete transcriptDeltasRef.current[itemId];
           setInterimTranscription("");
           break;
+        }
 
         case "response.created":
         case "response.output_item.added":
@@ -137,6 +214,10 @@ export default function useRealtimeTranscription(
           break;
 
         case "error":
+          if (isIgnorableCommitError(msg.error)) {
+            console.warn("[RealtimeTranscription] Ignoring empty commit:", msg.error?.message);
+            break;
+          }
           console.error("[RealtimeTranscription] Error:", msg.error);
           setError(msg.error?.message || "Unknown error");
           break;
@@ -158,25 +239,21 @@ export default function useRealtimeTranscription(
     const dataChannel = dataChannelRef.current;
     if (!dataChannel || dataChannel.readyState !== "open") return;
 
-    // We need server_vad for transcription to work (it commits audio buffers)
-    // The AI will respond but we simply ignore its audio output
+    // The client secret is minted with the transcription config. Keep this as
+    // a narrow fallback for sessions that accept runtime updates.
     const sessionUpdate = {
       type: "session.update",
       session: {
-        modalities: ["text", "audio"],
-        // Enable transcription
-        input_audio_transcription: {
-          model: "whisper-1",
+        type: "transcription",
+        audio: {
+          input: {
+            noise_reduction: { type: "near_field" },
+            transcription: {
+              model: OPENAI_REALTIME_TRANSCRIPTION_MODEL,
+            },
+            turn_detection: null,
+          },
         },
-        // Use VAD so audio gets committed and transcribed
-        turn_detection: {
-          type: "server_vad",
-          threshold: 0.5,
-          prefix_padding_ms: 300,
-          silence_duration_ms: 500, // Short silence to get quick transcriptions
-        },
-        // Minimal instructions - AI will respond but we mute its audio
-        instructions: "You are a transcription assistant. Simply acknowledge with a very brief 'OK' or stay silent.",
       },
     };
 
@@ -195,6 +272,9 @@ export default function useRealtimeTranscription(
 
     setIsConnecting(true);
     setError(null);
+    setRecordingDuration(0);
+    lastLoggedDurationRef.current = 0;
+    transcriptDeltasRef.current = {};
     isStoppingRef.current = false;
 
     try {
@@ -217,6 +297,11 @@ export default function useRealtimeTranscription(
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       const audioCtx = new AudioContextClass();
       audioContextRef.current = audioCtx;
+      if (audioCtx.state === "suspended") {
+        await audioCtx.resume().catch((err) => {
+          console.warn("[RealtimeTranscription] Failed to resume AudioContext:", err);
+        });
+      }
       const source = audioCtx.createMediaStreamSource(stream);
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 256;
@@ -233,9 +318,16 @@ export default function useRealtimeTranscription(
             const float = (dataArray[i] - 128) / 128;
             sum += float * float;
           }
-          setCurrentVolume(Math.sqrt(sum / dataArray.length));
+          const volume = Math.sqrt(sum / dataArray.length);
+          setCurrentVolume(volume);
         }
       }, 100);
+      startedAtRef.current = Date.now();
+      if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);
+      durationIntervalRef.current = window.setInterval(() => {
+        if (!startedAtRef.current) return;
+        setRecordingDuration((Date.now() - startedAtRef.current) / 1000);
+      }, 250);
 
       // Get ephemeral token
       const ephemeralToken = await getEphemeralToken();
@@ -249,28 +341,16 @@ export default function useRealtimeTranscription(
       if (!audioTrack) {
         throw new Error("No audio track available");
       }
-      pc.addTransceiver(audioTrack, { direction: "sendrecv" });
-
-      // Create dummy video track (required by API)
-      const dummyCanvas = document.createElement("canvas");
-      dummyCanvas.width = 640;
-      dummyCanvas.height = 480;
-      const ctx = dummyCanvas.getContext("2d");
-      if (ctx) {
-        ctx.fillStyle = "#000000";
-        ctx.fillRect(0, 0, dummyCanvas.width, dummyCanvas.height);
-      }
-      const dummyStream = dummyCanvas.captureStream(1);
-      const videoTrack = dummyStream.getVideoTracks()[0];
-      pc.addTransceiver(videoTrack, { direction: "sendrecv" });
+      pc.addTrack(audioTrack, stream);
 
       // Create data channel
-      const dataChannel = pc.createDataChannel("response");
+      const dataChannel = pc.createDataChannel("oai-events");
       dataChannelRef.current = dataChannel;
 
       dataChannel.onopen = () => {
         console.log("[RealtimeTranscription] Data channel open");
         sendSessionConfig();
+        startCommitLoop();
         setIsConnecting(false);
         setIsActive(true);
         playSound("/sounds/session-start.mp3");
@@ -295,10 +375,8 @@ export default function useRealtimeTranscription(
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      // Connect to Realtime API
-      const baseUrl = "https://api.openai.com/v1/realtime";
-      const model = "gpt-realtime";
-      const response = await fetch(`${baseUrl}?model=${model}&voice=alloy`, {
+      // Connect to the GA Realtime WebRTC endpoint.
+      const response = await fetch("https://api.openai.com/v1/realtime/calls", {
         method: "POST",
         body: offer.sdp,
         headers: {
@@ -322,13 +400,22 @@ export default function useRealtimeTranscription(
       setIsConnecting(false);
       stop();
     }
-  }, [isActive, isConnecting, selectedMicrophoneId, getEphemeralToken, sendSessionConfig, handleDataChannelMessage]);
+  }, [
+    isActive,
+    isConnecting,
+    selectedMicrophoneId,
+    getEphemeralToken,
+    sendSessionConfig,
+    startCommitLoop,
+    handleDataChannelMessage,
+  ]);
 
   /**
    * Stop transcription and cleanup
    */
   const stop = useCallback(() => {
     isStoppingRef.current = true;
+    stopCommitLoop();
 
     if (dataChannelRef.current) {
       dataChannelRef.current.close();
@@ -359,13 +446,37 @@ export default function useRealtimeTranscription(
     setIsActive(false);
     setIsConnecting(false);
     setInterimTranscription("");
+    transcriptDeltasRef.current = {};
 
     if (!error) {
       playSound("/sounds/session-end.mp3");
     }
 
+    if (durationIntervalRef.current) {
+      clearInterval(durationIntervalRef.current);
+      durationIntervalRef.current = null;
+    }
+    if (startedAtRef.current) {
+      const duration = (Date.now() - startedAtRef.current) / 1000;
+      setRecordingDuration(duration);
+      const billableDelta = Math.max(0, duration - lastLoggedDurationRef.current);
+      lastLoggedDurationRef.current = duration;
+      const minutes = billableDelta / 60;
+      if (minutes > 0) {
+        const cost = minutes * PRICING[OPENAI_REALTIME_TRANSCRIPTION_MODEL].per_minute;
+        addCostLog({
+          model: OPENAI_REALTIME_TRANSCRIPTION_MODEL,
+          type: "transcription",
+          seconds: billableDelta,
+          cost,
+          metadata: { duration: billableDelta, realtime: true },
+        }).catch((err) => console.error("Failed to log realtime transcription cost:", err));
+      }
+      startedAtRef.current = null;
+    }
+
     console.log("[RealtimeTranscription] Stopped");
-  }, [error]);
+  }, [error, stopCommitLoop]);
 
   /**
    * Stop gracefully, wait for pending transcription, and return final text
@@ -377,6 +488,9 @@ export default function useRealtimeTranscription(
         track.enabled = false;
       });
     }
+    if (dataChannelRef.current?.readyState === "open") {
+      commitAudioBuffer("stop", true);
+    }
 
     // Wait for any pending transcription to complete (interim becomes empty)
     // Max wait 5 seconds
@@ -386,13 +500,18 @@ export default function useRealtimeTranscription(
     }
 
     // Get the final text before closing
-    const finalText = transcriptionRef.current;
+    const pendingText = interimRef.current && !["Listening...", "Processing..."].includes(interimRef.current)
+      ? interimRef.current.trim()
+      : "";
+    const finalText = pendingText && !transcriptionRef.current.endsWith(pendingText)
+      ? `${transcriptionRef.current}${transcriptionRef.current ? " " : ""}${pendingText}`
+      : transcriptionRef.current;
 
     // Now close everything
     stop();
 
     return finalText;
-  }, [stop]);
+  }, [commitAudioBuffer, stop]);
 
   /**
    * Clear transcription text
@@ -416,6 +535,7 @@ export default function useRealtimeTranscription(
     interimTranscription,
     error,
     currentVolume,
+    recordingDuration,
     start,
     stop,
     stopAndGetText,

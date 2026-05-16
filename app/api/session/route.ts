@@ -1,4 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  OPENAI_REALTIME_TRANSCRIPTION_MODEL,
+  OPENAI_REALTIME_VOICE_MODEL,
+  REALTIME_2_INSTRUCTION_APPENDIX,
+  REALTIME_VOICE_TURN_DETECTION,
+} from "@/lib/openai-models";
 
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 10;
@@ -90,29 +96,64 @@ export async function POST(request: NextRequest) {
       "ash",
       "ballad",
       "coral",
+      "cedar",
+      "echo",
+      "marin",
       "sage",
+      "shimmer",
       "verse",
     ]);
     const voice =
       typeof body?.voice === "string" && allowedVoices.has(body.voice)
         ? body.voice
         : "alloy";
+    const isTranscriptionSession = body?.mode === "transcription";
+    const payload = isTranscriptionSession
+      ? {
+          session: {
+            type: "transcription",
+            audio: {
+              input: {
+                noise_reduction: { type: "near_field" },
+                transcription: {
+                  model: OPENAI_REALTIME_TRANSCRIPTION_MODEL,
+                },
+                turn_detection: null,
+              },
+            },
+          },
+        }
+      : {
+          session: {
+            type: "realtime",
+            model: OPENAI_REALTIME_VOICE_MODEL,
+            output_modalities: ["audio"],
+            audio: {
+              input: {
+                transcription: {
+                  model: OPENAI_REALTIME_TRANSCRIPTION_MODEL,
+                },
+                turn_detection: REALTIME_VOICE_TURN_DETECTION,
+              },
+              output: {
+                voice,
+              },
+            },
+            instructions:
+              "Start conversation with the user by saying 'Hello, how can I help you today?' Use the available tools when relevant. After executing a tool, you will need to respond (create a subsequent conversation item) to the user sharing the function result or error. If you do not respond with additional message with function result, user will not know you successfully executed the tool. Speak and respond in the language of the user. You can call stopSession when the user is done talking." +
+              REALTIME_2_INSTRUCTION_APPENDIX,
+            tool_choice: "auto",
+          },
+        };
     const response = await fetch(
-      "https://api.openai.com/v1/realtime/sessions",
+      "https://api.openai.com/v1/realtime/client_secrets",
       {
         method: "POST",
         headers: {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: "gpt-realtime",
-          voice,
-          modalities: ["audio", "text"],
-          instructions:
-            "Start conversation with the user by saying 'Hello, how can I help you today?' Use the available tools when relevant. After executing a tool, you will need to respond (create a subsequent conversation item) to the user sharing the function result or error. If you do not respond with additional message with function result, user will not know you successfully executed the tool. Speak and respond in the language of the user. You can call stopSession when the user is done talking.",
-          tool_choice: "auto",
-        }),
+        body: JSON.stringify(payload),
       }
     );
 

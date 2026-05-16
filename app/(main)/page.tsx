@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useWakeWord } from "@/hooks/use-wake-word";
 import useWebRTCAudioSession, { Tool } from "@/hooks/use-webrtc";
-import { useSmartTranscription } from "@/hooks/use-smart-transcription";
+import useRealtimeTranscription from "@/hooks/use-realtime-transcription";
 import useTranscription from "@/hooks/use-transcription";
 import { useMCPFunctions, useToolsFunctions } from "@/hooks/use-tools";
 import { TranslationsProvider } from "@/components/translations-context";
@@ -234,27 +234,21 @@ function AppContent() {
   const [, setIsTextImprovementOpen] = useState(false);
   const wakeWordEnabled = autoWakeWordEnabled;
 
-  // Smart transcription mode hook (Ctrl+Shift+T) - local VAD
+  // Live transcription mode hook (Ctrl+Shift+T) - OpenAI realtime transcription session
   const {
-    state: smartState,
     isActive: isTranscribing,
+    isConnecting: isTranscribingConnecting,
+    transcription: realtimeTranscription,
+    interimTranscription,
+    recordingDuration: realtimeRecordingDuration,
+    error: realtimeTranscriptionError,
     start: startTranscription,
-    stop: stopTranscription,
+    stop: stopRealtimeTranscription,
+    stopAndGetText: stopTranscription,
     clear: clearTranscription,
-  } = useSmartTranscription({ deviceId: selectedMicrophoneId });
+  } = useRealtimeTranscription(selectedMicrophoneId);
 
-  // Derived state from smart transcription
-  const isTranscribingConnecting = smartState.status === "listening";
-  const realtimeTranscription = smartState.transcription;
-  const interimTranscription = smartState.status === "listening"
-    ? "Listening..."
-    : smartState.status === "recording"
-    ? "Recording..."
-    : smartState.status === "processing"
-    ? "Processing..."
-    : "";
-
-  // Whisper transcription mode hook (Ctrl+Shift+R) - better quality, record then transcribe
+  // HQ transcription mode hook (Ctrl+Shift+R) - better quality, record then transcribe
   const {
     isRecording: isWhisperRecording,
     isProcessing: isWhisperProcessing,
@@ -459,23 +453,19 @@ function AppContent() {
     }
   }, [realtimeTranscription, interimTranscription, isTranscribing, isTranscribingConnecting]);
 
-  // Send smart transcription state updates to window
+  // Send live transcription state updates to window
   useEffect(() => {
-    const isListening = smartState.status === "listening";
-    const isRecording = smartState.status === "recording";
-    const isProcessing = smartState.status === "processing";
-
-    if (smartState.status !== "idle") {
+    if (isTranscribing || isTranscribingConnecting) {
       window.electron?.transcription?.updateState?.({
-        isListening,
-        isRecording,
-        isProcessing,
-        recordingDuration: smartState.recordingDurationSeconds || 0,
+        isListening: true,
+        isRecording: false,
+        isProcessing: false,
+        recordingDuration: realtimeRecordingDuration || 0,
       });
       return;
     }
 
-    // When Smart stops, explicitly reset the overlay state, but don't clobber Whisper UI.
+    // When Live stops, explicitly reset the overlay state, but don't clobber HQ UI.
     if (!isWhisperRecording && !isWhisperProcessing) {
       window.electron?.transcription?.updateState?.({
         isListening: false,
@@ -484,13 +474,25 @@ function AppContent() {
         recordingDuration: 0,
       });
     }
-  }, [smartState.status, smartState.recordingDurationSeconds, isWhisperRecording, isWhisperProcessing]);
+  }, [
+    isTranscribing,
+    isTranscribingConnecting,
+    realtimeRecordingDuration,
+    isWhisperRecording,
+    isWhisperProcessing,
+  ]);
 
-  // Update transcription window for Whisper mode recording status
-  // Note: Processing state is handled directly in handleWhisperToggle for better timing
+  useEffect(() => {
+    if (realtimeTranscriptionError) {
+      toast.error(`Live transcription failed: ${realtimeTranscriptionError}`);
+    }
+  }, [realtimeTranscriptionError]);
+
+  // Update transcription window for HQ recording status
+  // Note: Processing state is handled directly in handleWhisperToggle for better timing.
   useEffect(() => {
     if (isWhisperRecording) {
-      window.electron?.transcription?.updateText?.("", "Recording... (Whisper mode - press Ctrl+Shift+R to stop)");
+      window.electron?.transcription?.updateText?.("", "Recording... (HQ mode - press Ctrl+Shift+R to transcribe)");
     }
   }, [isWhisperRecording]);
 
@@ -499,22 +501,22 @@ function AppContent() {
     const unsubscribe = window.electron?.transcription?.onWindowClosed?.(() => {
       console.log("[Transcription] Window closed externally");
       if (isTranscribing) {
-        stopTranscription();
+        stopRealtimeTranscription();
       }
-      // Cancel Whisper recording when the window is closed (stop without transcribing)
+      // Cancel HQ recording when the window is closed (stop without transcribing)
       if (isWhisperRecording) {
         cancelWhisperRecording();
       }
     });
     return () => unsubscribe?.();
-  }, [isTranscribing, stopTranscription, isWhisperRecording, cancelWhisperRecording]);
+  }, [isTranscribing, stopRealtimeTranscription, isWhisperRecording, cancelWhisperRecording]);
 
   // Listen for transcription stop event from IPC
   useEffect(() => {
     const unsubscribe = window.electron?.transcription?.onStop?.(() => {
       console.log("[Transcription] Stop command received from IPC");
       if (isTranscribing) {
-        stopTranscription();
+        stopRealtimeTranscription();
       }
       if (isWhisperRecording) {
         // We can't await the result here easily, but we can stop recording
@@ -526,12 +528,12 @@ function AppContent() {
       }
     });
     return () => unsubscribe?.();
-  }, [isTranscribing, stopTranscription, isWhisperRecording, stopWhisperRecording]);
+  }, [isTranscribing, stopRealtimeTranscription, isWhisperRecording, stopWhisperRecording]);
 
-  // Listen for Whisper cancel event from IPC (stop without transcribing)
+  // Listen for HQ cancel event from IPC (stop without transcribing)
   useEffect(() => {
     const unsubscribe = window.electron?.transcription?.onCancelWhisper?.(() => {
-      console.log("[Transcription] Cancel Whisper command received from IPC");
+      console.log("[Transcription] Cancel HQ command received from IPC");
       if (isWhisperRecording) {
         cancelWhisperRecording();
         window.electron?.transcription?.updateText?.("", "Cancelled");
@@ -550,7 +552,7 @@ function AppContent() {
       return;
     }
     if (isWhisperRecording || isWhisperProcessing) {
-      toast.error("Stop Whisper recording first");
+      toast.error("Stop HQ recording first");
       return;
     }
 
@@ -613,7 +615,7 @@ function AppContent() {
     return () => unsubscribe?.();
   }, []);
 
-  // Handle Whisper transcription toggle (Ctrl+Shift+R) - better quality
+  // Handle HQ transcription toggle (Ctrl+Shift+R) - better quality
   const handleWhisperToggle = useCallback(async () => {
     // Don't allow during active voice session or other transcription
     if (isSessionActive) {
@@ -624,18 +626,12 @@ function AppContent() {
       toast.error("Stop real-time transcription first");
       return;
     }
-    // Check if microphone is selected (only when starting, not stopping)
-    if (!isWhisperRecording && !selectedMicrophoneId) {
-      toast.error("Please select a microphone first");
-      return;
-    }
-
     if (isWhisperRecording) {
       // Calculate recording duration before stopping
       const recordingDuration = (Date.now() - whisperStartTimeRef.current) / 1000;
 
       // Send processing state BEFORE awaiting the result
-      console.log("[Whisper] Sending processing state, duration:", recordingDuration);
+      console.log("[HQ transcription] Sending processing state, duration:", recordingDuration);
       await window.electron?.transcription?.updateText?.("", "");
       // With new state sync, we don't need updateProcessingState explicitly if hooks handle it
       // But updateProcessingState handles the duration logic in the main process which then sends to window
@@ -672,15 +668,15 @@ function AppContent() {
         // Track recording start time for progress bar
         whisperStartTimeRef.current = Date.now();
         // Update window to show "Recording..." status
-        await window.electron?.transcription?.updateText?.("", "Recording... (Whisper mode - press Ctrl+Shift+R to stop)");
+        await window.electron?.transcription?.updateText?.("", "Recording... (HQ mode - press Ctrl+Shift+R to transcribe)");
         await startWhisperRecording();
       } else {
         toast.error("Failed to open transcription window");
       }
     }
-  }, [isSessionActive, isTranscribing, isTranscribingConnecting, isWhisperRecording, startWhisperRecording, stopWhisperRecording, selectedMicrophoneId]);
+  }, [isSessionActive, isTranscribing, isTranscribingConnecting, isWhisperRecording, startWhisperRecording, stopWhisperRecording]);
 
-  // Handle smart transcription toggle (Ctrl+Shift+T)
+  // Handle live realtime transcription toggle (Ctrl+Shift+T)
   const handleTranscriptionToggle = useCallback(async () => {
     // Don't allow transcription during active voice session
     if (isSessionActive) {
@@ -688,15 +684,9 @@ function AppContent() {
       return;
     }
     if (isWhisperRecording || isWhisperProcessing) {
-      toast.error("Stop Whisper recording first");
+      toast.error("Stop HQ recording first");
       return;
     }
-    // Check if microphone is selected (only when starting, not stopping)
-    if (!isTranscribing && !isTranscribingConnecting && !selectedMicrophoneId) {
-      toast.error("Please select a microphone first");
-      return;
-    }
-
     if (isTranscribing || isTranscribingConnecting) {
       // Stop and get final transcription
       const finalText = await stopTranscription();
@@ -725,7 +715,7 @@ function AppContent() {
         toast.error("Failed to open transcription window");
       }
     }
-  }, [isSessionActive, isTranscribing, isTranscribingConnecting, isWhisperRecording, isWhisperProcessing, startTranscription, stopTranscription, clearTranscription, selectedMicrophoneId]);
+  }, [isSessionActive, isTranscribing, isTranscribingConnecting, isWhisperRecording, isWhisperProcessing, startTranscription, stopTranscription, clearTranscription]);
 
   // Handle text improvement toggle (Ctrl+Shift+G)
   const handleTextImprovementToggle = useCallback(async () => {
@@ -737,9 +727,9 @@ function AppContent() {
     try {
       let initialText: string | undefined;
 
-      // If whisper transcription is active, stop it and use its text
+      // If HQ transcription is active, stop it and use its text
       if (isWhisperRecording) {
-        console.log("[TextImprovement] Stopping whisper transcription to capture text");
+        console.log("[TextImprovement] Stopping HQ transcription to capture text");
 
         // Close the transcription window first
         await window.electron?.transcription?.closeWindow?.();
@@ -783,7 +773,7 @@ function AppContent() {
     });
 
     const unsubscribeWhisper = window.electron?.onToggleWhisper?.(() => {
-      console.log("[GlobalShortcut] Ctrl+Shift+R received - Whisper transcription");
+      console.log("[GlobalShortcut] Ctrl+Shift+R received - HQ transcription");
       handleWhisperToggle();
     });
 
@@ -848,12 +838,6 @@ function AppContent() {
       debug("Ignoring wake word trigger immediately after reinitialization.");
       return;
     }
-    if (!selectedMicrophoneId) {
-      debug("Ignoring wake word - no microphone selected.");
-      toast.error("Please select a microphone first");
-      return;
-    }
-
     sessionStoppedByLLMRef.current = false; // Clear LLM stop flag on wake word start
     playSound("/sounds/on-wakeword.mp3");
     startSession();
@@ -867,7 +851,7 @@ function AppContent() {
     stopWakeWordRef
       .current()
       .catch((err) => console.error("Error stopping wake word:", err));
-  }, [isSessionActive, isTranscribing, isTranscribingConnecting, justReinitialized, manualStop, startSession, selectedMicrophoneId]);
+  }, [isSessionActive, isTranscribing, isTranscribingConnecting, justReinitialized, manualStop, startSession]);
 
   const wakeWordConfig = useWakeWordConfig(
     handleWakeWord,
@@ -957,17 +941,13 @@ function AppContent() {
       toast.error("Stop transcription first to start voice session");
       return;
     }
-    if (!selectedMicrophoneId) {
-      toast.error("Please select a microphone first");
-      return;
-    }
     sessionStoppedByLLMRef.current = false; // Clear LLM stop flag on manual start
     setManualStop(false);
     setAutoWakeWordEnabled(true);
     setJustReinitialized(false);
     playSound("/sounds/on-wakeword.mp3");
     startSession();
-  }, [isSessionActive, isTranscribing, isTranscribingConnecting, startSession, selectedMicrophoneId]);
+  }, [isSessionActive, isTranscribing, isTranscribingConnecting, startSession]);
 
   const onButtonClick = useCallback(() => {
     debug("Button clicked with detected:", detected);
@@ -1140,13 +1120,13 @@ function AppContent() {
                 ? "bg-slate-800/30 border border-slate-700/20 text-slate-600 cursor-not-allowed opacity-50"
                 : "bg-slate-800/50 hover:bg-purple-500/20 border border-slate-600/30 hover:border-purple-400/30 text-slate-400 hover:text-purple-300"
             }`}
-            title={isTranscribing ? "Stop Smart (Ctrl+Shift+T)" : "Smart transcription (Ctrl+Shift+T)"}
+            title={isTranscribing ? "Stop Live (Ctrl+Shift+T)" : "Live Realtime Whisper (Ctrl+Shift+T)"}
           >
             <AudioLines className="w-5 h-5" />
-            <span className="hidden sm:inline font-medium text-sm">{isTranscribing ? "Stop" : "Smart"}</span>
+            <span className="hidden sm:inline font-medium text-sm">{isTranscribing ? "Stop" : "Live"}</span>
           </button>
 
-          {/* Whisper Transcription Button (Ctrl+Shift+R) */}
+          {/* HQ Transcription Button (Ctrl+Shift+R) */}
           <button
             onClick={handleWhisperToggle}
             disabled={isSessionActive || isTranscribing}
@@ -1159,7 +1139,7 @@ function AppContent() {
                 ? "bg-slate-800/30 border border-slate-700/20 text-slate-600 cursor-not-allowed opacity-50"
                 : "bg-slate-800/50 hover:bg-orange-500/20 border border-slate-600/30 hover:border-orange-400/30 text-slate-400 hover:text-orange-300"
             }`}
-            title={isWhisperRecording ? "Stop HQ (Ctrl+Shift+R)" : "HQ transcription (Ctrl+Shift+R)"}
+            title={isWhisperRecording ? "Transcribe HQ (Ctrl+Shift+R)" : "HQ GPT-4o transcription (Ctrl+Shift+R)"}
           >
             <FileAudio className="w-5 h-5" />
             <span className="hidden sm:inline font-medium text-sm">{isWhisperRecording ? "Stop" : "HQ"}</span>

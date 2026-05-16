@@ -23,7 +23,7 @@ export default function RootLayout({
     <html lang="en" className="dark" suppressHydrationWarning>
       <body
         className={cn(
-          "h-screen w-screen overflow-hidden bg-transparent font-sans antialiased",
+          "h-screen w-screen overflow-hidden bg-slate-950 font-sans antialiased",
           geistSans.variable
         )}
       >

@@ -1,10 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
+import { OPENAI_FILE_TRANSCRIPTION_MODEL } from "@/lib/openai-models";
 
 const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
 
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY_MS = 1000;
-const REQUEST_TIMEOUT_MS = 30000; // 30 seconds
+const REQUEST_TIMEOUT_MS = 60000; // Higher-accuracy transcription can take longer on large clips.
+
+function getAudioFilename(audioFile: File) {
+  if (audioFile.name && audioFile.name !== "blob") {
+    return audioFile.name;
+  }
+
+  if (audioFile.type.includes("wav")) return "audio.wav";
+  if (audioFile.type.includes("mpeg") || audioFile.type.includes("mp3")) return "audio.mp3";
+  if (audioFile.type.includes("mp4")) return "audio.mp4";
+  if (audioFile.type.includes("m4a")) return "audio.m4a";
+  if (audioFile.type.includes("webm")) return "audio.webm";
+  return "audio.webm";
+}
 
 async function fetchWithTimeout(
   url: string,
@@ -36,8 +50,8 @@ async function transcribeWithRetry(
     try {
       // Create fresh form data for each attempt
       const openaiFormData = new FormData();
-      openaiFormData.append("file", audioFile, "audio.webm");
-      openaiFormData.append("model", "whisper-1");
+      openaiFormData.append("file", audioFile, getAudioFilename(audioFile));
+      openaiFormData.append("model", OPENAI_FILE_TRANSCRIPTION_MODEL);
       openaiFormData.append("response_format", "json");
 
       // Add prompt for context (previous transcription + style hints)

@@ -23,7 +23,7 @@ export default function OverlayLayout({
       <body
         className={geistSans.variable}
         style={{
-          background: "transparent",
+          background: "#020617",
           margin: 0,
           padding: 0,
           overflow: "hidden",

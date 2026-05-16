@@ -18,6 +18,7 @@ import {
 import { VADProcessor } from "@/lib/audio/vad-processor";
 import { AudioChunkManager } from "@/lib/audio/audio-chunk-manager";
 import { TRANSCRIPTION_STYLE_HINT } from "@/lib/text-improvement-prompts";
+import { OPENAI_FILE_TRANSCRIPTION_MODEL } from "@/lib/openai-models";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 
@@ -161,9 +162,9 @@ export function useSmartTranscription({
           
           // Log cost
           const minutes = durationSec / 60;
-          const cost = minutes * PRICING["whisper-1"].per_minute;
+          const cost = minutes * PRICING[OPENAI_FILE_TRANSCRIPTION_MODEL].per_minute;
           addCostLog({
-            model: "whisper-1",
+            model: OPENAI_FILE_TRANSCRIPTION_MODEL,
             type: "transcription",
             seconds: durationSec,
             cost,
